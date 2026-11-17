@@ -83,11 +83,7 @@ internal static partial class IntentValidator
     private static IntentDecision ValidateSingleAccount(
         string command, BankingIntent intent, string request, string action, string accountDescription, string example)
     {
-        string? account = NormalizeAccount(intent.Account);
-        if (account is not null && !IsNamedIn(request, account))
-        {
-            account = null;
-        }
+        string? account = NamedAccount(intent.Account, request);
 
         List<string> missing = new List<string>();
         if (IsBlank(intent.Amount))
@@ -112,21 +108,10 @@ internal static partial class IntentValidator
 
     private static IntentDecision ValidateTransfer(BankingIntent intent, string request)
     {
-        string? from = NormalizeAccount(intent.FromAccount);
-        string? to = NormalizeAccount(intent.ToAccount);
-
-        // If the customer named neither account, anything the model supplied was guessed, so ask instead.
-        if (!(from is not null && IsNamedIn(request, from)) && !(to is not null && IsNamedIn(request, to)))
-        {
-            from = null;
-            to = null;
-        }
-
-        // With exactly two accounts, a transfer that names one side can only go to or from the other.
-        // This deduction is made here rather than by the model, so a stated "savings to savings" is
-        // never rewritten.
-        from ??= OtherAccount(to);
-        to ??= OtherAccount(from);
+        // Both sides must be named by the customer. A missing side is asked for, never filled in,
+        // even though there are only two accounts.
+        string? from = NamedAccount(intent.FromAccount, request);
+        string? to = NamedAccount(intent.ToAccount, request);
 
         List<string> missing = new List<string>();
         if (IsBlank(intent.Amount))
@@ -187,12 +172,15 @@ internal static partial class IntentValidator
         _ => null
     };
 
-    private static string? OtherAccount(string? account) => account switch
+    /// <summary>
+    /// The model's account, but only if the customer's own words name it. Otherwise the model
+    /// supplied it on its own, so it is treated as missing and the customer is asked.
+    /// </summary>
+    private static string? NamedAccount(string? modelAccount, string request)
     {
-        Chequing => Savings,
-        Savings => Chequing,
-        _ => null
-    };
+        string? account = NormalizeAccount(modelAccount);
+        return account is not null && IsNamedIn(request, account) ? account : null;
+    }
 
     private static bool IsBlank(string? text) => string.IsNullOrWhiteSpace(text);
 

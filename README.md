@@ -10,7 +10,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). R
 
 ```sh
 dotnet build
-dotnet test                                          # 112 automated tests, no API key or network needed
+dotnet test                                          # 113 automated tests, no API key or network needed
 dotnet run --project BankingCli                      # start the CLI
 dotnet run --project BankingCli -- --show-commands   # also show the simulator command and raw result for each English request
 ```
@@ -82,7 +82,7 @@ Each line of input goes through these steps (`BankingCli/NaturalLanguage/Banking
 3. **Validate locally** (`IntentValidator.cs`)
    - The app accepts only the four operations and the two account names, requires a positive amount with at most two decimal places, and refuses multiple operations.
    - **An account only counts if the user's own words name it** ("chequing", "checking", "chq", "savings", and so on). If the model returns an account the user never mentioned, it is treated as missing.
-   - With only two accounts, a transfer that names one side can only use the other. The code fills that in, not the model.
+   - Transfers need both accounts named. A missing side is asked for, never filled in, even though there are only two accounts.
    - The command is built from these known values only. No text from the model is ever copied into it.
    - Anything missing gets a specific clarification message, and nothing runs.
 4. **Execute once.** The single validated command runs through the unchanged simulator. This is the only place an English request can change a balance.
@@ -107,7 +107,7 @@ DEPOSIT $10.00 TO savings | savings=$10.00
 bank> Move four dollars from savings to chequing
   [command: transfer savings chequing 4.00]
   [result: TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00]
-The transfer of $4.00 from your savings account to your chequing account was successful. Your new balances are $6.00 in savings and $4.00 in chequing.
+The transfer of $4.00 from your savings account to your chequing account was successful. Your savings balance is now $6.00, and your chequing balance is $4.00.
 bank> balance
 chequing=$4.00 | savings=$6.00
 ```
@@ -128,7 +128,7 @@ chequing=$0.00 | savings=$10.00
 bank> Move $3 from savings to chequing
   [command: transfer savings chequing 3.00]
   [result: TRANSFER $3.00 FROM savings TO chequing | savings=$7.00 | chequing=$3.00]
-The transfer of $3.00 from your savings account to your chequing account was successful. Your savings balance is now $7.00, and your chequing balance is $3.00.
+The transfer of $3.00 from your savings account to your chequing account was successful. Your new savings balance is $7.00, and your chequing balance is $3.00.
 ```
 
 Observed: the app named the missing detail (the amount) and ran no command; there is no `[command: ...]` line. Balances stayed at chequing $0.00 and savings $10.00. The complete follow-up request then worked normally.
@@ -143,7 +143,7 @@ DEPOSIT $10.00 TO chequing | chequing=$10.00
 bank> Withdraw $25 from chequing
   [command: withdraw chequing 25.00]
   [result: ERROR INSUFFICIENT_FUNDS | chequing=$10.00]
-The withdrawal of $25 from your chequing account did not go through because there are insufficient funds; your current balance is $10.00.
+The withdrawal of $25 from your chequing account didn't go through because there are insufficient funds. Your current balance in the chequing account is $10.00.
 bank> balance
 chequing=$10.00 | savings=$0.00
 ```
@@ -157,14 +157,14 @@ These were run the same way, on the final code, and used the real API unless not
 | Input | Observed result |
 | --- | --- |
 | `Put fifty dollars into savings` | Ran `deposit savings 50.00`, and the reply matched the simulator ($50.00 balance). |
-| `How much money do I have in both accounts?` | Ran `balance` (read-only): "Your chequing account has $4.00 and your savings account has $46.00." |
-| `What's my savings balance?` | Ran `balance savings`: "Your savings account balance is $46.00." |
+| `How much money do I have in both accounts?` | Ran `balance` (read-only): "You have $4.00 in your chequing account and $46.00 in your savings account." |
+| `What's my savings balance?` | Ran `balance savings`: "Your savings balance is $46.00." |
 | `Take 20 bucks out of my chequing account` | Ran `withdraw chequing 20.00`. The simulator declined (`INSUFFICIENT_FUNDS`, $4.00), and the reply explained it. |
 | `Deposit $1,000 into savings` | Ran `deposit savings 1000.00`. |
 | `Deposit $20` / `Withdraw 5 dollars` | Asked for the account. No command ran. |
 | `Move $4` / `Transfer ten dollars please` | Asked for the from and to accounts. No command ran. |
-| `Move $4 to chequing` | Ran `transfer savings chequing 4.00`, with the other account deduced. |
-| `Transfer $2 from chequing` | Ran `transfer chequing savings 2.00`. |
+| `Move $4 to chequing` | Asked for the account to move money from. No command ran. |
+| `Transfer $2 from chequing` / `Move $4 out of savings` | Asked for the account to move money to. No command ran. |
 | `Transfer $5 from savings to savings` | Ran as stated. The simulator declined (`ERROR SAME_ACCOUNT`), and the reply explained that transfers need two different accounts. |
 | `Deposit -5 dollars into savings` / `Deposit $10.555 into chequing` | Rejected: amount must be positive with at most two decimal places. No command ran. |
 | `Deposit $50 into savings and move $20 to chequing` | "I can only handle one banking request at a time..." No command ran. |
@@ -179,7 +179,7 @@ These were run the same way, on the final code, and used the real API unless not
 
 ### Automated tests
 
-`dotnet test` runs 112 xUnit tests against the real `BankSession`, with a scripted fake in place of the API, in `BankingCli.Tests/`. They cover:
+`dotnet test` runs 113 xUnit tests against the real `BankSession`, with a scripted fake in place of the API, in `BankingCli.Tests/`. They cover:
 
 - Original commands give the same output as `BankSession` and make zero API calls.
 - Each of the four operations maps to exactly one command.
@@ -201,7 +201,7 @@ The three required scenarios also have automated equivalents in `BankingAssistan
   - "Transfer ten dollars please" now **invented** both accounts and ran a transfer. Before the change it had correctly asked.
   - "Transfer $5 from savings to savings" was **rewritten** into savings → chequing, a transaction the user never asked for.
 
-  So the prompt rule was rejected. Prompt wording alone can't guarantee "never invent account information". It was replaced with a deterministic local check: an account counts only if the user's text names it, and the code, not the model, deduces the other side of a one-account transfer. To verify, every manual check was re-run on the final code (the tables above), and unit tests now pin both failures (`IntentValidatorTests`).
+  So the prompt rule was rejected. Prompt wording alone can't guarantee "never invent account information". It was replaced with a deterministic local check: an account counts only if the user's text names it. Claude Code then proposed filling in the other side of a one-account transfer in code, since there are only two accounts. I rejected that too, because the brief asks for missing details to be requested, not inferred. To verify, every manual check was re-run on the final code (the tables above), and unit tests now pin each case (`IntentValidatorTests`).
 - **A smaller fix found by tests:** the first version of the HTTP client threw `ArgumentOutOfRangeException` on an empty `choices` array instead of giving a readable error. It was rewritten with explicit `TryGetProperty` checks, and the `Malformed_success_responses_are_reported` tests went from failing to passing.
 
 ## Beyond the requirements, and limitations
@@ -218,7 +218,7 @@ No optional enhancements from the brief were built: no history, no multi-turn me
 Limitations:
 
 - **One request at a time.** There is no conversation memory, so a clarification needs a complete new request.
-- **The model still chooses the operation and direction.** For example, "Move $4 out of savings" was read as a transfer to chequing, not a withdrawal. Local checks guarantee that the accounts and amount came from the user, but not which of two plausible readings was meant.
+- **The model still chooses the operation and direction.** Local checks guarantee that every account was named by the user, but not which of two plausible readings was meant. For example, "Move $4 out of savings" was read as a transfer, so it asked where to move the money rather than treating it as a withdrawal.
 - **Typos and nicknames for accounts trigger a clarification question.** For example, "savngs" or "rainy-day fund". That's the safe way to be wrong.
 - **Amounts aren't checked against the user's text the way accounts are.** The model returned `null` for every request without an amount that I tried, but nothing in the code forces that.
 - **The reply check only catches dollar figures.** It verifies figures written with `$`, not amounts written in words. The prompt asks for `$X.XX`.

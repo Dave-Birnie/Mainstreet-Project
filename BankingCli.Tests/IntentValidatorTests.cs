@@ -133,13 +133,20 @@ public class IntentValidatorTests
     }
 
     [Theory]
-    [InlineData("Move $4 to chequing", null, "chequing", "transfer savings chequing 4.00")]
-    [InlineData("Move $4 out of my savings", "savings", null, "transfer savings chequing 4.00")]
-    [InlineData("Send 4 bucks to my checking account", null, "chequing", "transfer savings chequing 4.00")]
-    [InlineData("Move $4 to chequing", "savings", "chequing", "transfer savings chequing 4.00")]
-    public void Naming_one_side_of_a_transfer_is_enough_because_there_are_only_two_accounts(
-        string request, string? from, string? to, string expected) =>
-        Assert.Equal(expected, Validate("transfer", from: from, to: to, amount: "4", request: request).Command);
+    [InlineData("Move $4 to chequing", null, "chequing", "the account to move money from")]
+    [InlineData("Move $4 to chequing", "savings", "chequing", "the account to move money from")]
+    [InlineData("Send 4 bucks to my checking account", "savings", "chequing", "the account to move money from")]
+    [InlineData("Move $4 out of my savings", "savings", null, "the account to move money to")]
+    [InlineData("Move $4 out of my savings", "savings", "chequing", "the account to move money to")]
+    public void A_transfer_that_names_one_account_asks_for_the_other_instead_of_filling_it_in(
+        string request, string? from, string? to, string expectedDetail)
+    {
+        IntentDecision decision = Validate("transfer", from: from, to: to, amount: "4", request: request);
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Null(decision.Command);
+        Assert.Contains($"I need a bit more information to make that transfer: {expectedDetail}", decision.Message);
+    }
 
     [Fact]
     public void A_stated_same_account_transfer_is_not_rewritten() =>
