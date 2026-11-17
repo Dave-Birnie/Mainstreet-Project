@@ -4,9 +4,13 @@ namespace BankingCli.Tests;
 
 public class IntentValidatorTests
 {
-    private static BankingIntent Intent(
+    // Mentions both accounts, so tests that are not about account grounding are unaffected by it.
+    private const string NamesBothAccounts = "(a request about chequing and savings)";
+
+    private static IntentDecision Validate(
         string? operation, string? account = null, string? from = null, string? to = null, string? amount = null,
-        bool multiple = false) => new BankingIntent(operation, account, from, to, amount, multiple);
+        bool multiple = false, string request = NamesBothAccounts) =>
+        IntentValidator.Validate(new BankingIntent(operation, account, from, to, amount, multiple), request);
 
     [Theory]
     [InlineData("deposit", "savings", "50", "deposit savings 50.00")]
@@ -16,20 +20,16 @@ public class IntentValidatorTests
     public void Valid_single_account_requests_map_to_one_command(
         string operation, string account, string amount, string expected)
     {
-        IntentDecision decision = IntentValidator.Validate(Intent(operation, account, amount: amount));
+        IntentDecision decision = Validate(operation, account, amount: amount);
 
         Assert.Equal(DecisionKind.Execute, decision.Kind);
         Assert.Equal(expected, decision.Command);
     }
 
     [Fact]
-    public void Valid_transfer_maps_to_one_command()
-    {
-        IntentDecision decision = IntentValidator.Validate(
-            Intent("transfer", from: "savings", to: "chequing", amount: "4"));
-
-        Assert.Equal("transfer savings chequing 4.00", decision.Command);
-    }
+    public void Valid_transfer_maps_to_one_command() =>
+        Assert.Equal("transfer savings chequing 4.00",
+            Validate("transfer", from: "savings", to: "chequing", amount: "4").Command);
 
     [Theory]
     [InlineData(null, "balance")]
@@ -37,16 +37,12 @@ public class IntentValidatorTests
     [InlineData("savings", "balance savings")]
     [InlineData("checking", "balance chequing")]
     public void Balance_requests_map_to_the_read_only_balance_command(string? account, string expected) =>
-        Assert.Equal(expected, IntentValidator.Validate(Intent("balance", account)).Command);
+        Assert.Equal(expected, Validate("balance", account).Command);
 
     [Fact]
-    public void Transfer_to_the_same_account_is_left_to_the_simulator_rules()
-    {
-        IntentDecision decision = IntentValidator.Validate(
-            Intent("transfer", from: "savings", to: "savings", amount: "5"));
-
-        Assert.Equal("transfer savings savings 5.00", decision.Command);
-    }
+    public void Transfer_to_the_same_account_is_left_to_the_simulator_rules() =>
+        Assert.Equal("transfer savings savings 5.00",
+            Validate("transfer", from: "savings", to: "savings", amount: "5").Command);
 
     [Theory]
     [InlineData("deposit", null, "50", "the account to deposit into")]
@@ -57,7 +53,7 @@ public class IntentValidatorTests
     public void Missing_or_unclear_details_ask_for_clarification(
         string operation, string? account, string? amount, string expectedDetail)
     {
-        IntentDecision decision = IntentValidator.Validate(Intent(operation, account, amount: amount));
+        IntentDecision decision = Validate(operation, account, amount: amount);
 
         Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
         Assert.Null(decision.Command);
@@ -68,7 +64,7 @@ public class IntentValidatorTests
     [Fact]
     public void Transfer_missing_everything_lists_each_missing_detail()
     {
-        IntentDecision decision = IntentValidator.Validate(Intent("transfer"));
+        IntentDecision decision = Validate("transfer");
 
         Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
         Assert.Contains("the amount, the account to move money from (chequing or savings), and the account to " +
@@ -86,7 +82,7 @@ public class IntentValidatorTests
     [InlineData("5; withdraw savings 100")]
     public void Invalid_amounts_are_rejected_before_anything_runs(string amount)
     {
-        IntentDecision decision = IntentValidator.Validate(Intent("withdraw", "chequing", amount: amount));
+        IntentDecision decision = Validate("withdraw", "chequing", amount: amount);
 
         Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
         Assert.Null(decision.Command);
@@ -95,8 +91,7 @@ public class IntentValidatorTests
     [Fact]
     public void Multiple_operations_are_refused()
     {
-        IntentDecision decision = IntentValidator.Validate(
-            Intent("deposit", "savings", amount: "10", multiple: true));
+        IntentDecision decision = Validate("deposit", "savings", amount: "10", multiple: true);
 
         Assert.Equal(DecisionKind.MultipleOperations, decision.Kind);
         Assert.Null(decision.Command);
@@ -110,7 +105,7 @@ public class IntentValidatorTests
     [InlineData(null)]
     public void Unsupported_operations_are_refused(string? operation)
     {
-        IntentDecision decision = IntentValidator.Validate(Intent(operation, "savings", amount: "5"));
+        IntentDecision decision = Validate(operation, "savings", amount: "5");
 
         Assert.Equal(DecisionKind.Unsupported, decision.Kind);
         Assert.Null(decision.Command);
@@ -119,10 +114,60 @@ public class IntentValidatorTests
     [Fact]
     public void Account_text_from_the_model_is_never_copied_into_the_command()
     {
-        IntentDecision decision = IntentValidator.Validate(
-            Intent("deposit", "savings 5\ntransfer savings chequing", amount: "5"));
+        IntentDecision decision = Validate("deposit", "savings 5\ntransfer savings chequing", amount: "5");
 
         Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
         Assert.Null(decision.Command);
     }
+
+    // Seen with gpt-4o-mini: for "Transfer ten dollars please" it returned chequing -> savings.
+    [Fact]
+    public void Transfer_accounts_the_customer_never_named_are_treated_as_missing()
+    {
+        IntentDecision decision = Validate(
+            "transfer", from: "chequing", to: "savings", amount: "10", request: "Transfer ten dollars please");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Contains("the account to move money from (chequing or savings) and the account to move money to",
+            decision.Message);
+    }
+
+    [Theory]
+    [InlineData("Move $4 to chequing", null, "chequing", "transfer savings chequing 4.00")]
+    [InlineData("Move $4 out of my savings", "savings", null, "transfer savings chequing 4.00")]
+    [InlineData("Send 4 bucks to my checking account", null, "chequing", "transfer savings chequing 4.00")]
+    [InlineData("Move $4 to chequing", "savings", "chequing", "transfer savings chequing 4.00")]
+    public void Naming_one_side_of_a_transfer_is_enough_because_there_are_only_two_accounts(
+        string request, string? from, string? to, string expected) =>
+        Assert.Equal(expected, Validate("transfer", from: from, to: to, amount: "4", request: request).Command);
+
+    [Fact]
+    public void A_stated_same_account_transfer_is_not_rewritten() =>
+        Assert.Equal("transfer savings savings 5.00", Validate(
+            "transfer", from: "savings", to: "savings", amount: "5",
+            request: "Transfer $5 from savings to savings").Command);
+
+    [Theory]
+    [InlineData("Deposit $20")]
+    [InlineData("Deposit $20 into my TFSA")]
+    [InlineData("Deposit $20 into savngs")]
+    public void Single_account_the_customer_never_named_is_treated_as_missing(string request)
+    {
+        IntentDecision decision = Validate("deposit", "savings", amount: "20", request: request);
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Contains("the account to deposit into", decision.Message);
+    }
+
+    [Fact]
+    public void Balance_for_an_account_the_customer_never_named_shows_both_balances() =>
+        Assert.Equal("balance", Validate("balance", "savings", request: "What's my balance?").Command);
+
+    [Theory]
+    [InlineData("chequing", "Deposit 5 into CHEQUING")]
+    [InlineData("chequing", "deposit 5 in my checking account")]
+    [InlineData("chequing", "deposit 5 into chq")]
+    [InlineData("savings", "deposit 5 into my Saving account")]
+    public void Common_ways_of_naming_an_account_are_recognized(string account, string request) =>
+        Assert.True(IntentValidator.IsNamedIn(request, account));
 }

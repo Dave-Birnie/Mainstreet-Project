@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace BankingCli.NaturalLanguage;
 
@@ -24,15 +25,18 @@ internal sealed record IntentDecision(DecisionKind Kind, string? Command, string
 
 /// <summary>
 /// Checks the model's output locally and builds the simulator command from known values only.
-/// No text from the model is ever copied into the command.
+/// No text from the model is ever copied into the command, and an account only counts if the
+/// customer's own words name it.
 /// </summary>
-internal static class IntentValidator
+internal static partial class IntentValidator
 {
     private const string Chequing = "chequing";
     private const string Savings = "savings";
     private const string NothingChanged = "Nothing has been changed.";
 
-    public static IntentDecision Validate(BankingIntent intent)
+    /// <param name="intent">The model's reading of the request.</param>
+    /// <param name="request">The customer's original text, used to confirm that named accounts were really said.</param>
+    public static IntentDecision Validate(BankingIntent intent, string request)
     {
         if (intent.MultipleOperations)
         {
@@ -43,12 +47,12 @@ internal static class IntentValidator
 
         return intent.Operation?.Trim().ToLowerInvariant() switch
         {
-            "balance" => ValidateBalance(intent),
-            "deposit" => ValidateSingleAccount("deposit", intent,
+            "balance" => ValidateBalance(intent, request),
+            "deposit" => ValidateSingleAccount("deposit", intent, request,
                 "make that deposit", "the account to deposit into (chequing or savings)", "Deposit $50 into savings"),
-            "withdraw" => ValidateSingleAccount("withdraw", intent,
+            "withdraw" => ValidateSingleAccount("withdraw", intent, request,
                 "make that withdrawal", "the account to withdraw from (chequing or savings)", "Withdraw $20 from chequing"),
-            "transfer" => ValidateTransfer(intent),
+            "transfer" => ValidateTransfer(intent, request),
             _ => IntentDecision.Decline(DecisionKind.Unsupported,
                 "Sorry, I can only help with deposits, withdrawals, transfers between chequing and savings, " +
                 "and balance checks. Try something like \"Move $20 from savings to chequing\", or type help " +
@@ -56,7 +60,7 @@ internal static class IntentValidator
         };
     }
 
-    private static IntentDecision ValidateBalance(BankingIntent intent)
+    private static IntentDecision ValidateBalance(BankingIntent intent, string request)
     {
         string? requested = intent.Account?.Trim().ToLowerInvariant();
 
@@ -67,16 +71,24 @@ internal static class IntentValidator
         }
 
         string? account = NormalizeAccount(requested);
-        return account is null
-            ? IntentDecision.Decline(DecisionKind.MissingDetails,
-                "Which balance would you like to see: chequing, savings, or both? Please include it when you try again.")
-            : IntentDecision.Run($"balance {account}");
+        if (account is null)
+        {
+            return IntentDecision.Decline(DecisionKind.MissingDetails,
+                "Which balance would you like to see: chequing, savings, or both? Please include it when you try again.");
+        }
+
+        return IntentDecision.Run(IsNamedIn(request, account) ? $"balance {account}" : "balance");
     }
 
     private static IntentDecision ValidateSingleAccount(
-        string command, BankingIntent intent, string action, string accountDescription, string example)
+        string command, BankingIntent intent, string request, string action, string accountDescription, string example)
     {
         string? account = NormalizeAccount(intent.Account);
+        if (account is not null && !IsNamedIn(request, account))
+        {
+            account = null;
+        }
+
         List<string> missing = new List<string>();
         if (IsBlank(intent.Amount))
         {
@@ -98,10 +110,24 @@ internal static class IntentValidator
             : InvalidAmount();
     }
 
-    private static IntentDecision ValidateTransfer(BankingIntent intent)
+    private static IntentDecision ValidateTransfer(BankingIntent intent, string request)
     {
         string? from = NormalizeAccount(intent.FromAccount);
         string? to = NormalizeAccount(intent.ToAccount);
+
+        // If the customer named neither account, anything the model supplied was guessed, so ask instead.
+        if (!(from is not null && IsNamedIn(request, from)) && !(to is not null && IsNamedIn(request, to)))
+        {
+            from = null;
+            to = null;
+        }
+
+        // With exactly two accounts, a transfer that names one side can only go to or from the other.
+        // This deduction is made here rather than by the model, so a stated "savings to savings" is
+        // never rewritten.
+        from ??= OtherAccount(to);
+        to ??= OtherAccount(from);
+
         List<string> missing = new List<string>();
         if (IsBlank(intent.Amount))
         {
@@ -161,7 +187,28 @@ internal static class IntentValidator
         _ => null
     };
 
+    private static string? OtherAccount(string? account) => account switch
+    {
+        Chequing => Savings,
+        Savings => Chequing,
+        _ => null
+    };
+
     private static bool IsBlank(string? text) => string.IsNullOrWhiteSpace(text);
+
+    /// <summary>
+    /// True when the customer's text contains a word for the account. A typo or nickname fails this
+    /// check and leads to a clarification question, which is the safe direction to be wrong in.
+    /// </summary>
+    internal static bool IsNamedIn(string request, string account) => account == Chequing
+        ? ChequingWords().IsMatch(request)
+        : SavingsWords().IsMatch(request);
+
+    [GeneratedRegex(@"\b(chequing|chequings|checking|checkings|cheq|chq)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ChequingWords();
+
+    [GeneratedRegex(@"\b(savings?)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex SavingsWords();
 
     private static IntentDecision AskFor(string action, List<string> missing, string example)
     {

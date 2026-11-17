@@ -53,7 +53,7 @@ internal sealed class BankingAssistant
                 "You can try again, or use a command such as \"transfer savings chequing 4\" (type help for the list).");
         }
 
-        IntentDecision decision = IntentValidator.Validate(intent);
+        IntentDecision decision = IntentValidator.Validate(intent, input);
         if (decision.Command is null)
         {
             return new CommandResult(decision.Message);

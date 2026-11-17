@@ -37,6 +37,7 @@ internal sealed class IntentInterpreter(IChatClient chatClient)
 
         Rules:
         - deposit and withdraw use "account". transfer uses "from_account" and "to_account". balance uses "account", which is "both" when the customer asks about both accounts or does not name an account.
+        - A request to move or transfer money is a transfer, even when details are missing. Set "from_account" and "to_account" only to an account the customer named for that side, and use null for a side they did not name. If the customer names the same account for both sides, keep it exactly as given.
         - Set every property that does not apply to the operation to null.
         - "amount" is the dollar amount as plain digits with an optional decimal point, such as "50" or "25.75", with no "$" sign or commas. Convert words to digits ("fifty dollars" becomes "50"). Keep a minus sign and every decimal place exactly as the customer gave them. Do not round.
         - Never guess. If the customer did not clearly state an amount or an account that the operation needs, set it to null.
