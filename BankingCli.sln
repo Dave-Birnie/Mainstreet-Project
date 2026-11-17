@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingCli", "BankingCli\BankingCli.csproj", "{81FD7A25-AE2A-46C4-970A-E81193C9FA90}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingCli.Tests", "BankingCli.Tests\BankingCli.Tests.csproj", "{B6F8F718-E471-4019-959E-3767847F7386}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{81FD7A25-AE2A-46C4-970A-E81193C9FA90}.Release|x64.Build.0 = Release|Any CPU
 		{81FD7A25-AE2A-46C4-970A-E81193C9FA90}.Release|x86.ActiveCfg = Release|Any CPU
 		{81FD7A25-AE2A-46C4-970A-E81193C9FA90}.Release|x86.Build.0 = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|x64.Build.0 = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Debug|x86.Build.0 = Debug|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|x64.ActiveCfg = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|x64.Build.0 = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|x86.ActiveCfg = Release|Any CPU
+		{B6F8F718-E471-4019-959E-3767847F7386}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
