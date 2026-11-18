@@ -12,6 +12,9 @@ namespace BankingCli.NaturalLanguage;
 /// <param name="Timeout">How long to wait for each API call.</param>
 internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string ApiKey, TimeSpan Timeout)
 {
+    /// <summary>Where the key came from, for the status command, such as "from BANKING_AI_API_KEY".</summary>
+    public string ApiKeySource { get; init; } = $"from {ApiKeyVariable}";
+
     #region Environment variables and defaults
 
     public const string ApiKeyVariable = "BANKING_AI_API_KEY";
@@ -28,6 +31,10 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
 
     #region Loading
 
+    /// <summary>True when an API key is set in either supported variable.</summary>
+    public static bool HasApiKey(Func<string, string?> getVariable) =>
+        Read(getVariable, ApiKeyVariable) is not null || Read(getVariable, FallbackApiKeyVariable) is not null;
+
     /// <summary>
     /// Reads the settings. Returns false, with a readable explanation, when they are missing or invalid.
     /// </summary>
@@ -38,10 +45,17 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
         problem = string.Empty;
 
         // API key: required.
-        string? apiKey = Read(getVariable, ApiKeyVariable) ?? Read(getVariable, FallbackApiKeyVariable);
+        string? apiKey = Read(getVariable, ApiKeyVariable);
+        string keySource = $"from {ApiKeyVariable}";
         if (apiKey is null)
         {
-            problem = $"{ApiKeyVariable} is not set.";
+            apiKey = Read(getVariable, FallbackApiKeyVariable);
+            keySource = $"from {FallbackApiKeyVariable}";
+        }
+
+        if (apiKey is null)
+        {
+            problem = "No API key is set.";
             return false;
         }
 
@@ -51,7 +65,7 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
                         && (baseUri.Scheme == Uri.UriSchemeHttps || baseUri.Scheme == Uri.UriSchemeHttp);
         if (!isWebUrl)
         {
-            problem = $"{EndpointVariable} must be an http or https URL, such as {DefaultEndpoint}.";
+            problem = $"{EndpointVariable} isn't a valid web address. Set it to an http or https URL, such as {DefaultEndpoint}.";
             return false;
         }
 
@@ -64,7 +78,7 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
                 out timeoutSeconds);
             if (!isWholeNumber || timeoutSeconds <= 0)
             {
-                problem = $"{TimeoutVariable} must be a whole number of seconds greater than zero.";
+                problem = $"{TimeoutVariable} isn't a whole number of seconds. Set it to a number such as 30.";
                 return false;
             }
         }
@@ -73,7 +87,10 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
             ToChatCompletionsUri(baseUri!),
             Read(getVariable, ModelVariable) ?? DefaultModel,
             apiKey,
-            TimeSpan.FromSeconds(timeoutSeconds));
+            TimeSpan.FromSeconds(timeoutSeconds))
+        {
+            ApiKeySource = keySource
+        };
         return true;
     }
 

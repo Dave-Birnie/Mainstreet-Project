@@ -9,7 +9,7 @@ public class BankingAssistantTests
     private readonly FakeChatClient chat = new FakeChatClient();
     private readonly List<string> trace = [];
 
-    private BankingAssistant CreateAssistant() => new BankingAssistant(session, chat, trace: trace.Add);
+    private BankingAssistant CreateAssistant() => new BankingAssistant(session, AiConnection.On(chat), trace: trace.Add);
 
     private string Balances() => session.Execute("balance").Output;
 
@@ -74,13 +74,14 @@ public class BankingAssistantTests
     {
         BankingAssistant assistant = CreateAssistant();
         await assistant.HandleAsync("deposit savings 10");
-        chat.Throws(new AiServiceException("the AI service did not respond within 30 seconds."));
+        chat.Throws(new AiServiceException("the AI service took longer than 30 seconds to answer", "Try again in a moment."));
 
         CommandResult result = await assistant.HandleAsync("Move four dollars from savings to chequing");
 
         Assert.Equal(
-            "Sorry, I couldn't process that request because the AI service did not respond within 30 seconds. " +
-            "Nothing has been changed. You can try again, or use a command such as \"transfer savings chequing 4\" " +
+            "Sorry, I couldn't process that request: the AI service took longer than 30 seconds to answer. " +
+            $"Nothing has been changed.{Environment.NewLine}" +
+            "To fix this: Try again in a moment. You can still use commands such as \"transfer savings chequing 4\" " +
             "(type help for the list).",
             result.Output);
         Assert.Equal("chequing=$0.00 | savings=$10.00", Balances());
@@ -92,12 +93,13 @@ public class BankingAssistantTests
     {
         BankingAssistant assistant = CreateAssistant();
         chat.ReturnsIntent("deposit", "savings", amount: "10")
-            .Throws(new AiServiceException("the AI service returned HTTP 500 (server error)."));
+            .Throws(new AiServiceException("the AI service had a problem on its end", "Wait a moment and try again."));
 
         CommandResult result = await assistant.HandleAsync("Put ten dollars in savings");
 
+        // No "try again" here: the deposit already happened, so trying again would deposit twice.
         Assert.Equal(
-            "I couldn't write a conversational reply because the AI service returned HTTP 500 (server error). " +
+            "I ran your request, but couldn't write a conversational reply: the AI service had a problem on its end. " +
             $"Here is the simulator's result:{Environment.NewLine}DEPOSIT $10.00 TO savings | savings=$10.00",
             result.Output);
         Assert.Equal("chequing=$0.00 | savings=$10.00", Balances()); // Deposited once, not twice.
@@ -114,6 +116,22 @@ public class BankingAssistantTests
 
         Assert.EndsWith($"{Environment.NewLine}DEPOSIT $10.00 TO savings | savings=$10.00", result.Output);
         Assert.Equal("chequing=$0.00 | savings=$10.00", Balances());
+    }
+
+    [Fact]
+    public async Task Reply_claiming_success_for_a_declined_withdrawal_falls_back_to_the_explained_result()
+    {
+        BankingAssistant assistant = CreateAssistant();
+        await assistant.HandleAsync("deposit chequing 10");
+        chat.ReturnsIntent("withdraw", "chequing", amount: "25").Returns("Done! I withdrew $25.00 from chequing.");
+
+        CommandResult result = await assistant.HandleAsync("Withdraw $25 from chequing");
+
+        Assert.Contains("(it didn't say the request was declined)", result.Output);
+        Assert.Contains($"{Environment.NewLine}ERROR INSUFFICIENT_FUNDS | chequing=$10.00{Environment.NewLine}", result.Output);
+        Assert.EndsWith("Chequing only has $10.00, which isn't enough. Try a smaller amount, or move money into " +
+                        "chequing first. Nothing has been changed.", result.Output);
+        Assert.Equal("chequing=$10.00 | savings=$0.00", Balances());
     }
 
     [Fact]
@@ -145,6 +163,21 @@ public class BankingAssistantTests
         Assert.Single(chat.Calls);
     }
 
+    // From the ChatGPT review: if the model supplies an amount the customer never gave, it must not run.
+    [Fact]
+    public async Task An_amount_the_customer_never_gave_is_asked_for_instead_of_run()
+    {
+        BankingAssistant assistant = CreateAssistant();
+        await assistant.HandleAsync("deposit savings 50");
+        chat.ReturnsIntent("transfer", from: "savings", to: "chequing", amount: "10");
+
+        CommandResult result = await assistant.HandleAsync("Move some money from savings to chequing");
+
+        Assert.Contains("I need a bit more information to make that transfer: the amount.", result.Output);
+        Assert.Equal("chequing=$0.00 | savings=$50.00", Balances());
+        Assert.Empty(trace);
+    }
+
     [Theory]
     [InlineData("-50")]
     [InlineData("12.345")]
@@ -169,6 +202,51 @@ public class BankingAssistantTests
 
         Assert.StartsWith("Sorry, I can only help with deposits, withdrawals, transfers", result.Output);
         Assert.Single(chat.Calls);
+    }
+
+    #endregion
+
+    #region Status command
+
+    [Fact]
+    public async Task Status_shows_the_setup_and_how_the_last_AI_call_went()
+    {
+        AiSettings settings = new AiSettings(
+            new Uri("https://llm.example.test/v1/chat/completions"), "test-model", "secret-key", TimeSpan.FromSeconds(30));
+        BankingAssistant assistant = new BankingAssistant(session, AiConnection.On(chat, settings));
+
+        string beforeAnyCalls = (await assistant.HandleAsync("status")).Output;
+
+        chat.Throws(new AiServiceException("the AI service didn't accept the API key", "Check the key.", "HTTP 401"));
+        await assistant.HandleAsync("Move four dollars from savings to chequing");
+        string afterAFailure = (await assistant.HandleAsync("STATUS")).Output;
+
+        Assert.Contains("Everyday-English requests: on", beforeAnyCalls);
+        Assert.Contains("Model:     test-model", beforeAnyCalls);
+        Assert.Contains("API key:   from BANKING_AI_API_KEY", beforeAnyCalls);
+        Assert.Contains("Last AI request: none yet", beforeAnyCalls);
+        Assert.DoesNotContain("secret-key", beforeAnyCalls);
+
+        Assert.Contains("Last AI request: failed because the AI service didn't accept the API key.", afterAFailure);
+        Assert.Contains("To fix:  Check the key.", afterAFailure);
+        Assert.Contains("Details: HTTP 401", afterAFailure);
+        Assert.Single(chat.Calls); // "status" itself never calls the API.
+    }
+
+    [Fact]
+    public async Task Status_without_an_API_says_why_and_how_to_fix_it()
+    {
+        BankingAssistant assistant = new BankingAssistant(
+            session, AiConnection.Off("No API key is set.", "Restart the app and enter a key when asked."));
+
+        string status = (await assistant.HandleAsync("status")).Output;
+
+        Assert.Equal(
+            $"Everyday-English requests: off{Environment.NewLine}" +
+            $"  Why:     No API key is set.{Environment.NewLine}" +
+            $"  To fix:  Restart the app and enter a key when asked.{Environment.NewLine}" +
+            "Original commands work either way. Type help to see them.",
+            status);
     }
 
     #endregion

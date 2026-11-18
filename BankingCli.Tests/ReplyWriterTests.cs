@@ -2,7 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
-/// <summary>Checks the conversational reply and the guard against misstated amounts.</summary>
+/// <summary>Checks what the reply writer sends to the model, and that a reply that disagrees with the simulator is rejected.</summary>
 public class ReplyWriterTests
 {
     private const string TransferResult = "TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00";
@@ -34,21 +34,16 @@ public class ReplyWriterTests
             chat.Calls[0].Messages[1].Content);
     }
 
-    [Theory]
-    [InlineData("I moved $4.00. You now have $6.00 in savings and $4 in chequing.", true)]
-    [InlineData("Done! Your transfer went through.", true)]
-    [InlineData("I moved $4.00. You now have $60.00 in savings.", false)]
-    [InlineData("You have $10.00 in total.", false)]
-    public void Replies_may_only_mention_amounts_from_the_command_or_result(string reply, bool allowed) =>
-        Assert.Equal(allowed,
-            ReplyWriter.MentionsOnlyKnownAmounts(reply, "transfer savings chequing 4.00", TransferResult));
-
     [Fact]
-    public async Task A_reply_with_a_wrong_figure_is_rejected()
+    public async Task A_reply_that_disagrees_with_the_simulator_is_rejected_and_kept_for_the_status_command()
     {
         FakeChatClient chat = new FakeChatClient().Returns("Done! You now have $1,000,000.00 in savings.");
 
-        await Assert.ThrowsAsync<AiServiceException>(() => new ReplyWriter(chat).WriteAsync(
+        AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => new ReplyWriter(chat).WriteAsync(
             "Move four dollars from savings to chequing", "transfer savings chequing 4.00", TransferResult, default));
+
+        Assert.Equal("the AI's reply didn't match the simulator's result " +
+                     "(it mentioned an amount the simulator didn't report), so I didn't show it", error.Problem);
+        Assert.Equal("Discarded reply: Done! You now have $1,000,000.00 in savings.", error.Details);
     }
 }

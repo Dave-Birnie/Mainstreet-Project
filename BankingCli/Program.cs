@@ -5,9 +5,17 @@ using BankingCli.NaturalLanguage;
 
 BankSession banking = new BankSession();
 bool interactive = !Console.IsInputRedirected;
-bool showCommands = args.Contains("--show-commands");
 
-BankingAssistant assistant = CreateAssistant(banking, interactive, showCommands);
+// --show-commands prints the simulator command and raw result under each English request.
+Action<string>? trace = args.Contains("--show-commands") ? line => Console.WriteLine($"  [{line}]") : null;
+
+AiConnection connection = ConnectToAi(interactive);
+BankingAssistant assistant = new BankingAssistant(banking, connection, interactive, trace);
+
+if (interactive)
+{
+    Console.WriteLine(ConsoleText.Welcome(connection));
+}
 
 #endregion
 
@@ -43,33 +51,39 @@ while (true)
 
 #region Helpers
 
-// Turns on natural-language requests when an API key is configured.
-// Without one, the app behaves exactly like the original starter.
-static BankingAssistant CreateAssistant(BankSession banking, bool interactive, bool showCommands)
+// Turns on everyday-English requests when an API key is available.
+// With no key, interactive users are offered the chance to enter one. Otherwise the app works like the original.
+static AiConnection ConnectToAi(bool interactive)
 {
-    if (!AiSettings.TryLoad(Environment.GetEnvironmentVariable, out AiSettings? settings, out string problem))
+    Func<string, string?> getVariable = Environment.GetEnvironmentVariable;
+    string? keySource = null;
+
+    if (!AiSettings.HasApiKey(getVariable))
     {
-        string notice = $"Natural-language requests are off: {problem} Original commands still work. " +
-                        "See README.md to enable them.";
-        if (interactive)
+        string? enteredKey = interactive ? ApiKeyPrompt.Ask() : null;
+        if (enteredKey is null)
         {
-            Console.WriteLine(notice);
+            return AiConnection.Off(
+                "No API key is set.",
+                $"Restart the app and enter a key when asked, or set {AiSettings.ApiKeyVariable} before starting it.");
         }
 
-        return new BankingAssistant(banking, chatClient: null, unavailableNotice: interactive ? notice : null);
+        // Use the typed key for this session only. It isn't saved anywhere.
+        getVariable = name => name == AiSettings.ApiKeyVariable ? enteredKey : Environment.GetEnvironmentVariable(name);
+        keySource = "entered at startup (not saved)";
     }
 
-    if (interactive)
+    if (!AiSettings.TryLoad(getVariable, out AiSettings? settings, out string problem))
     {
-        Console.WriteLine($"Natural-language requests are on (model: {settings!.Model}). " +
-                          "Type a request such as \"Move $4 from savings to chequing\", or help for commands.");
+        return AiConnection.Off(problem, "Then restart the app.");
     }
 
-    // --show-commands prints the simulator command and raw result under each English request.
-    Action<string>? trace = showCommands ? line => Console.WriteLine($"  [{line}]") : null;
+    if (keySource is not null)
+    {
+        settings = settings! with { ApiKeySource = keySource };
+    }
 
-    OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient(new HttpClient(), settings!);
-    return new BankingAssistant(banking, chatClient, trace: trace);
+    return AiConnection.On(new OpenAiCompatibleChatClient(new HttpClient(), settings!), settings);
 }
 
 #endregion

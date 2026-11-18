@@ -31,7 +31,7 @@ public class OriginalCommandTests
     {
         BankSession reference = new BankSession();
         FakeChatClient chat = new FakeChatClient();
-        BankingAssistant assistant = new BankingAssistant(new BankSession(), chat);
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), AiConnection.On(chat));
 
         // Replay the README setup first so balances are non-zero in both sessions.
         foreach (string setup in new[] { "deposit savings 10", "transfer savings chequing 4" })
@@ -58,10 +58,14 @@ public class OriginalCommandTests
     public void English_requests_are_not_treated_as_original_commands(string input) =>
         Assert.False(OriginalCommand.IsRecognized(input));
 
+    #region Without an API key
+
+    private static readonly AiConnection NoKey = AiConnection.Off("No API key is set.", "Set BANKING_AI_API_KEY.");
+
     [Fact]
-    public async Task Without_an_API_the_app_behaves_exactly_like_the_original_simulator()
+    public async Task Without_an_API_piped_input_behaves_exactly_like_the_original_simulator()
     {
-        BankingAssistant assistant = new BankingAssistant(new BankSession(), chatClient: null);
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), NoKey, interactive: false);
 
         CommandResult result = await assistant.HandleAsync("Put fifty dollars into savings");
 
@@ -69,14 +73,63 @@ public class OriginalCommandTests
     }
 
     [Fact]
-    public async Task Without_an_API_interactive_users_are_told_why_english_did_not_work()
+    public async Task Without_an_API_interactive_users_are_told_what_went_wrong_and_what_to_do()
     {
-        BankingAssistant assistant = new BankingAssistant(
-            new BankSession(), chatClient: null, unavailableNotice: "Natural-language requests are off.");
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), NoKey, interactive: true);
 
         CommandResult result = await assistant.HandleAsync("Put fifty dollars into savings");
 
-        Assert.Contains("ERROR UNKNOWN_COMMAND", result.Output);
-        Assert.Contains("Natural-language requests are off.", result.Output);
+        string[] lines = result.Output.Split(Environment.NewLine);
+        Assert.Equal("ERROR UNKNOWN_COMMAND", lines[0]); // The simulator's own line is unchanged.
+        Assert.Equal("I don't recognize that command. Type help to see the commands you can use.", lines[1]);
+        Assert.Equal("Everyday-English requests are off, so I can only follow the original commands. " +
+                     "Type status to see how to turn everyday English on.", lines[2]);
     }
+
+    #endregion
+
+    #region Interactive extras
+
+    [Fact]
+    public async Task Interactive_errors_keep_the_original_line_and_add_a_plain_explanation()
+    {
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), NoKey, interactive: true);
+        await assistant.HandleAsync("deposit chequing 3");
+
+        CommandResult result = await assistant.HandleAsync("withdraw chequing 100");
+
+        Assert.Equal(
+            $"ERROR INSUFFICIENT_FUNDS | chequing=$3.00{Environment.NewLine}" +
+            "Chequing only has $3.00, which isn't enough. Try a smaller amount, or move money into chequing first. " +
+            "Nothing has been changed.",
+            result.Output);
+    }
+
+    [Theory]
+    [InlineData("help")]
+    [InlineData("?")]
+    public async Task Interactive_help_keeps_the_original_list_and_adds_status_and_english_examples(string command)
+    {
+        FakeChatClient chat = new FakeChatClient();
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), AiConnection.On(chat), interactive: true);
+
+        CommandResult result = await assistant.HandleAsync(command);
+
+        Assert.StartsWith(new BankSession().Execute("help").Output + Environment.NewLine + "status", result.Output);
+        Assert.Contains("Move $20 from savings to chequing", result.Output);
+        Assert.Empty(chat.Calls);
+    }
+
+    [Fact]
+    public async Task Interactive_help_without_an_API_says_how_to_turn_english_on()
+    {
+        BankingAssistant assistant = new BankingAssistant(new BankSession(), NoKey, interactive: true);
+
+        CommandResult result = await assistant.HandleAsync("help");
+
+        Assert.EndsWith("Everyday-English requests are off. Type status to see why, and how to turn them on.",
+            result.Output);
+    }
+
+    #endregion
 }

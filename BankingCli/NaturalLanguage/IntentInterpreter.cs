@@ -71,7 +71,7 @@ internal sealed class IntentInterpreter(IChatClient chatClient)
         int end = content.LastIndexOf('}');
         if (start < 0 || end < start)
         {
-            throw new AiServiceException("the AI service did not return the expected JSON.");
+            throw UnexpectedFormat("The reply did not contain a JSON object.");
         }
 
         try
@@ -80,7 +80,7 @@ internal sealed class IntentInterpreter(IChatClient chatClient)
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                throw new AiServiceException("the AI service did not return the expected JSON.");
+                throw UnexpectedFormat("The reply was JSON, but not an object.");
             }
 
             return new BankingIntent(
@@ -93,9 +93,16 @@ internal sealed class IntentInterpreter(IChatClient chatClient)
         }
         catch (JsonException ex)
         {
-            throw new AiServiceException("the AI service did not return valid JSON.", ex);
+            throw UnexpectedFormat($"The reply was not valid JSON ({ex.Message}).", ex);
         }
     }
+
+    private static AiServiceException UnexpectedFormat(string details, Exception? innerException = null) =>
+        new AiServiceException(
+            "the AI's answer wasn't in the format I expected",
+            "Try again, or rephrase the request.",
+            details,
+            innerException);
 
     /// <summary>Reads a text or number property as text, or null if it's missing or another type.</summary>
     private static string? ReadText(JsonElement root, string name)

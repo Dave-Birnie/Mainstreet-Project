@@ -5,13 +5,14 @@ namespace BankingCli.Tests;
 /// <summary>Checks that the model's reading of a request becomes one safe command, or a clear message.</summary>
 public class IntentValidatorTests
 {
-    // Names both accounts, so tests that aren't about account names pass the "named by the customer" check.
-    private const string NamesBothAccounts = "(a request about chequing and savings)";
-
+    // By default the request names both accounts and the amount, so tests that aren't about
+    // the "the customer must have written it" checks pass them.
     private static IntentDecision Validate(
         string? operation, string? account = null, string? from = null, string? to = null, string? amount = null,
-        bool multiple = false, string request = NamesBothAccounts) =>
-        IntentValidator.Validate(new BankingIntent(operation, account, from, to, amount, multiple), request);
+        bool multiple = false, string? request = null) =>
+        IntentValidator.Validate(
+            new BankingIntent(operation, account, from, to, amount, multiple),
+            request ?? $"(a request about chequing and savings for {amount})");
 
     #region Complete requests become exactly one command
 
@@ -141,6 +142,31 @@ public class IntentValidatorTests
         Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
         Assert.Null(decision.Command);
     }
+
+    #endregion
+
+    #region Amounts must be written by the customer
+
+    // From the ChatGPT review: an amount the model made up must not run.
+    [Theory]
+    [InlineData("Move some money from savings to chequing", "10")]
+    [InlineData("Move 25 dollars from savings to chequing", "250")]
+    public void An_amount_the_customer_never_wrote_is_asked_for(string request, string modelAmount)
+    {
+        IntentDecision decision = Validate(
+            "transfer", from: "savings", to: "chequing", amount: modelAmount, request: request);
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Contains("I need a bit more information to make that transfer: the amount.", decision.Message);
+    }
+
+    [Theory]
+    [InlineData("Move four dollars from savings to chequing", "4", "transfer savings chequing 4.00")]
+    [InlineData("Move twenty-five bucks from savings to chequing", "25", "transfer savings chequing 25.00")]
+    [InlineData("Move $1,000 from savings to chequing", "1000", "transfer savings chequing 1000.00")]
+    public void Amounts_in_words_or_digits_are_accepted(string request, string modelAmount, string expected) =>
+        Assert.Equal(expected,
+            Validate("transfer", from: "savings", to: "chequing", amount: modelAmount, request: request).Command);
 
     #endregion
 

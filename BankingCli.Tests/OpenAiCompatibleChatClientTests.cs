@@ -62,7 +62,10 @@ public class OpenAiCompatibleChatClientTests
 
         AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
 
-        Assert.Equal("the AI service rejected the API key (HTTP 401). Check BANKING_AI_API_KEY.", error.Message);
+        Assert.Equal("the AI service didn't accept the API key", error.Problem);
+        Assert.Equal("Check that the key is correct and still active, then restart the app with the right key.",
+            error.Solution);
+        Assert.Equal("HTTP 401", error.Details);
         Assert.Equal(1, handler.RequestCount);
     }
 
@@ -74,8 +77,10 @@ public class OpenAiCompatibleChatClientTests
 
         AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
 
-        Assert.Contains("BANKING_AI_ENDPOINT", error.Message);
-        Assert.Contains("The model `test-model` does not exist", error.Message);
+        Assert.Equal("the AI service couldn't find the model \"test-model\"", error.Problem);
+        Assert.Contains("BANKING_AI_MODEL", error.Solution);
+        Assert.Contains("BANKING_AI_ENDPOINT", error.Solution);
+        Assert.Equal("HTTP 404: The model `test-model` does not exist", error.Details);
     }
 
     [Fact]
@@ -85,7 +90,9 @@ public class OpenAiCompatibleChatClientTests
 
         AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
 
-        Assert.Equal("the AI service at llm.example.test could not be reached (Name or service not known).", error.Message);
+        Assert.Equal("the AI service at llm.example.test couldn't be reached", error.Problem);
+        Assert.Contains("internet connection", error.Solution);
+        Assert.Equal("Name or service not known", error.Details);
         Assert.Equal(1, handler.RequestCount);
     }
 
@@ -101,7 +108,8 @@ public class OpenAiCompatibleChatClientTests
 
         AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler, settings: fast));
 
-        Assert.Equal("the AI service did not respond within 0.1 seconds.", error.Message);
+        Assert.Equal("the AI service took longer than 0.1 seconds to answer", error.Problem);
+        Assert.Contains("BANKING_AI_TIMEOUT_SECONDS", error.Solution);
         Assert.Equal(1, handler.RequestCount);
     }
 
@@ -113,7 +121,24 @@ public class OpenAiCompatibleChatClientTests
     {
         StubHttpHandler handler = StubHttpHandler.Json(HttpStatusCode.OK, body);
 
-        await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
+        AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
+
+        Assert.Equal("the AI service sent back a response I couldn't read", error.Problem);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, "the AI service is busy, or the account has run out of credit")]
+    [InlineData(HttpStatusCode.InternalServerError, "the AI service had a problem on its end")]
+    [InlineData(HttpStatusCode.BadGateway, "the AI service had a problem on its end")]
+    [InlineData(HttpStatusCode.BadRequest, "the AI service couldn't handle the request")]
+    public async Task Other_http_errors_say_what_went_wrong(HttpStatusCode status, string expectedProblem)
+    {
+        StubHttpHandler handler = StubHttpHandler.Json(status, """{"error":{"message":"provider says no"}}""");
+
+        AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
+
+        Assert.Equal(expectedProblem, error.Problem);
+        Assert.Equal($"HTTP {(int)status}: provider says no", error.Details);
     }
 
     [Theory]
@@ -125,7 +150,8 @@ public class OpenAiCompatibleChatClientTests
 
         AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
 
-        Assert.Equal("the AI service returned HTTP 500 (no details).", error.Message);
+        Assert.Equal("the AI service had a problem on its end", error.Problem);
+        Assert.Equal("HTTP 500: no details", error.Details);
     }
 
     #endregion

@@ -33,20 +33,27 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new AiServiceException(DescribeHttpError(response.StatusCode, responseText));
+                throw DescribeHttpError(response.StatusCode, responseText);
             }
 
             return ReadReplyText(responseText);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            string seconds = $"{settings.Timeout.TotalSeconds:0.##}";
             throw new AiServiceException(
-                $"the AI service did not respond within {settings.Timeout.TotalSeconds:0.##} seconds.");
+                $"the AI service took longer than {seconds} seconds to answer",
+                "Try again in a moment. If it keeps happening, check your internet connection, " +
+                $"or allow more time by setting {AiSettings.TimeoutVariable}.",
+                details: $"No response from {settings.ChatCompletionsUri.Host} within {seconds} seconds.");
         }
         catch (HttpRequestException ex)
         {
             throw new AiServiceException(
-                $"the AI service at {settings.ChatCompletionsUri.Host} could not be reached ({ex.Message}).", ex);
+                $"the AI service at {settings.ChatCompletionsUri.Host} couldn't be reached",
+                $"Check your internet connection, and that {AiSettings.EndpointVariable} is the right address.",
+                details: ex.Message,
+                ex);
         }
     }
 
@@ -93,7 +100,7 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
         }
         catch (JsonException ex)
         {
-            throw new AiServiceException("the AI service returned a response that was not valid JSON.", ex);
+            throw UnreadableResponse("The response was not valid JSON.", ex);
         }
 
         // Expected shape: { "choices": [ { "message": { "content": "..." } } ] }
@@ -108,31 +115,54 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
             return text;
         }
 
-        throw new AiServiceException("the AI service returned an empty reply.");
+        throw UnreadableResponse("The response had no reply text.");
     }
+
+    private static AiServiceException UnreadableResponse(string details, Exception? innerException = null) =>
+        new AiServiceException(
+            "the AI service sent back a response I couldn't read",
+            $"Try again. If it keeps happening, check that {AiSettings.EndpointVariable} points to an OpenAI-compatible API.",
+            details,
+            innerException);
 
     #endregion
 
     #region Error messages
 
-    /// <summary>Turns an HTTP error into a short explanation that says what to check.</summary>
-    private string DescribeHttpError(HttpStatusCode status, string responseText)
+    /// <summary>Turns an HTTP error into what went wrong and what to do about it.</summary>
+    private AiServiceException DescribeHttpError(HttpStatusCode status, string responseText)
     {
         int code = (int)status;
+        string details = $"HTTP {code}: {ProviderMessage(responseText)}";
+
         return status switch
         {
             // Never repeat the provider's text here: some providers include part of the key in it.
-            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
-                $"the AI service rejected the API key (HTTP {code}). Check {AiSettings.ApiKeyVariable}.",
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => new AiServiceException(
+                "the AI service didn't accept the API key",
+                "Check that the key is correct and still active, then restart the app with the right key.",
+                details: $"HTTP {code}"),
 
-            HttpStatusCode.NotFound =>
-                $"the AI service returned HTTP 404. Check {AiSettings.EndpointVariable} and that model " +
-                $"\"{settings.Model}\" exists ({ProviderMessage(responseText)}).",
+            HttpStatusCode.NotFound => new AiServiceException(
+                $"the AI service couldn't find the model \"{settings.Model}\"",
+                $"Check that {AiSettings.ModelVariable} is a model your provider offers, " +
+                $"and that {AiSettings.EndpointVariable} is correct.",
+                details),
 
-            HttpStatusCode.TooManyRequests =>
-                "the AI service is rate limiting requests or the account is out of quota (HTTP 429).",
+            HttpStatusCode.TooManyRequests => new AiServiceException(
+                "the AI service is busy, or the account has run out of credit",
+                "Wait a moment and try again. If it keeps happening, check your plan or billing with your AI provider.",
+                details),
 
-            _ => $"the AI service returned HTTP {code} ({ProviderMessage(responseText)})."
+            >= HttpStatusCode.InternalServerError => new AiServiceException(
+                "the AI service had a problem on its end",
+                "Wait a moment and try again.",
+                details),
+
+            _ => new AiServiceException(
+                "the AI service couldn't handle the request",
+                $"Check that {AiSettings.ModelVariable} is a chat model that supports JSON output.",
+                details)
         };
     }
 

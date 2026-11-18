@@ -8,8 +8,8 @@ namespace BankingCli.NaturalLanguage;
 /// </summary>
 /// <remarks>
 /// Commands are built only from known values (the operation, the two account names, and a
-/// formatted amount), never from the model's text. An account only counts if the customer's
-/// own words name it.
+/// formatted amount), never from the model's text. Accounts and amounts only count if the
+/// customer actually wrote them.
 /// </remarks>
 internal static class IntentValidator
 {
@@ -77,9 +77,10 @@ internal static class IntentValidator
         string command, BankingIntent intent, string request, string action, string accountDetail, string example)
     {
         string? account = NamedAccount(intent.Account, request);
+        AmountCheck amountCheck = CheckAmount(intent.Amount, request, out string amount);
 
         List<string> missing = new List<string>();
-        if (IsBlank(intent.Amount))
+        if (amountCheck == AmountCheck.Missing)
         {
             missing.Add("the amount");
         }
@@ -94,7 +95,7 @@ internal static class IntentValidator
             return AskFor(action, missing, example);
         }
 
-        return TryFormatAmount(intent.Amount!, out string amount)
+        return amountCheck == AmountCheck.Valid
             ? IntentDecision.Run($"{command} {account} {amount}")
             : IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage);
     }
@@ -107,9 +108,10 @@ internal static class IntentValidator
     {
         string? from = NamedAccount(intent.FromAccount, request);
         string? to = NamedAccount(intent.ToAccount, request);
+        AmountCheck amountCheck = CheckAmount(intent.Amount, request, out string amount);
 
         List<string> missing = new List<string>();
-        if (IsBlank(intent.Amount))
+        if (amountCheck == AmountCheck.Missing)
         {
             missing.Add("the amount");
         }
@@ -130,7 +132,7 @@ internal static class IntentValidator
         }
 
         // "Savings to savings" is passed through, so the simulator applies its own SAME_ACCOUNT rule.
-        return TryFormatAmount(intent.Amount!, out string amount)
+        return amountCheck == AmountCheck.Valid
             ? IntentDecision.Run($"transfer {from} {to} {amount}")
             : IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage);
     }
@@ -161,30 +163,50 @@ internal static class IntentValidator
 
     #region Helpers
 
+    private enum AmountCheck
+    {
+        Missing, // Not given, or the customer never wrote that number.
+        Invalid, // Not a positive amount with at most two decimal places.
+        Valid
+    }
+
     /// <summary>
-    /// Accepts a positive amount with no more than two decimal places and formats it the way the
-    /// simulator expects, such as "4.00". Anything else (negative, zero, words, symbols) is rejected.
+    /// Checks the model's amount. It must be a number the customer actually wrote, above zero,
+    /// with at most two decimal places. A valid amount is formatted the way the simulator expects, such as "4.00".
     /// </summary>
-    internal static bool TryFormatAmount(string text, out string formatted)
+    private static AmountCheck CheckAmount(string? text, string request, out string formatted)
     {
         formatted = string.Empty;
+        if (IsBlank(text))
+        {
+            return AmountCheck.Missing;
+        }
 
-        string trimmed = text.Trim();
+        string trimmed = text!.Trim();
         if (trimmed.StartsWith('$'))
         {
             trimmed = trimmed[1..].TrimStart();
         }
 
-        bool isNumber = decimal.TryParse(trimmed, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-            CultureInfo.InvariantCulture, out decimal amount);
-
-        if (!isNumber || amount <= 0m || amount != decimal.Round(amount, 2))
+        if (!decimal.TryParse(trimmed, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out decimal amount))
         {
-            return false;
+            return AmountCheck.Invalid;
+        }
+
+        // A number the customer never wrote was made up by the model, so ask for the amount instead.
+        if (!StatedAmounts.IsStatedIn(request, amount))
+        {
+            return AmountCheck.Missing;
+        }
+
+        if (amount <= 0m || amount != decimal.Round(amount, 2))
+        {
+            return AmountCheck.Invalid;
         }
 
         formatted = amount.ToString("0.00", CultureInfo.InvariantCulture);
-        return true;
+        return AmountCheck.Valid;
     }
 
     /// <summary>

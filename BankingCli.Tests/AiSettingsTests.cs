@@ -13,7 +13,8 @@ public class AiSettingsTests
     {
         Assert.False(AiSettings.TryLoad(Env(), out AiSettings? settings, out string problem));
         Assert.Null(settings);
-        Assert.Equal("BANKING_AI_API_KEY is not set.", problem);
+        Assert.Equal("No API key is set.", problem);
+        Assert.False(AiSettings.HasApiKey(Env()));
     }
 
     [Fact]
@@ -26,9 +27,15 @@ public class AiSettingsTests
         Assert.Equal(TimeSpan.FromSeconds(30), settings.Timeout);
     }
 
-    [Fact]
-    public void Openai_api_key_is_accepted_as_a_fallback() =>
-        Assert.True(AiSettings.TryLoad(Env(("OPENAI_API_KEY", "k")), out _, out _));
+    [Theory]
+    [InlineData("BANKING_AI_API_KEY")]
+    [InlineData("OPENAI_API_KEY")]
+    public void Either_key_variable_works_and_status_shows_which_was_used(string variable)
+    {
+        Assert.True(AiSettings.HasApiKey(Env((variable, "k"))));
+        Assert.True(AiSettings.TryLoad(Env((variable, "k")), out AiSettings? settings, out _));
+        Assert.Equal($"from {variable}", settings!.ApiKeySource);
+    }
 
     [Theory]
     [InlineData("http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions")]

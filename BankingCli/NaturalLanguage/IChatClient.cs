@@ -21,8 +21,20 @@ internal interface IChatClient
 }
 
 /// <summary>
-/// A problem talking to the AI service. The message is safe to show the user.
-/// It is written to follow "because", for example "because the AI service did not respond".
+/// A problem with the AI service, described for the user: what went wrong, and what to do about it.
 /// </summary>
-internal sealed class AiServiceException(string message, Exception? innerException = null)
-    : Exception(message, innerException);
+/// <param name="problem">What went wrong, as a short phrase that reads well after a colon,
+/// such as "the AI service didn't accept the API key".</param>
+/// <param name="solution">What the user can do about it, in one or two sentences.</param>
+/// <param name="details">Technical details, such as the HTTP status code, shown by the status command.</param>
+/// <param name="innerException">The original error, if there was one.</param>
+internal sealed class AiServiceException(
+    string problem, string solution, string? details = null, Exception? innerException = null)
+    : Exception(problem, innerException)
+{
+    public string Problem { get; } = problem;
+
+    public string Solution { get; } = solution;
+
+    public string? Details { get; } = details;
+}
