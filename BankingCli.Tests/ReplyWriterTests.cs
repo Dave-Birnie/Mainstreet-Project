@@ -2,6 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks the conversational reply and the guard against misstated amounts.</summary>
 public class ReplyWriterTests
 {
     private const string TransferResult = "TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00";

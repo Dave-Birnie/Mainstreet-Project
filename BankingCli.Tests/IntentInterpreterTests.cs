@@ -2,6 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks how requests are sent to the model and how its JSON is read.</summary>
 public class IntentInterpreterTests
 {
     [Fact]

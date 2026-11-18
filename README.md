@@ -10,7 +10,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). R
 
 ```sh
 dotnet build
-dotnet test                                          # 113 automated tests, no API key or network needed
+dotnet test                                          # 122 automated tests, no API key or network needed
 dotnet run --project BankingCli                      # start the CLI
 dotnet run --project BankingCli -- --show-commands   # also show the simulator command and raw result for each English request
 ```
@@ -81,7 +81,7 @@ Each line of input goes through these steps (`BankingCli/NaturalLanguage/Banking
 2. **Interpret** (`IntentInterpreter.cs`) The API returns a JSON object with `operation`, `account`, `from_account`, `to_account`, `amount`, and `multiple_operations`. The prompt tells the model to use `null` for anything not stated and to treat the user's text as data, not instructions.
 3. **Validate locally** (`IntentValidator.cs`)
    - The app accepts only the four operations and the two account names, requires a positive amount with at most two decimal places, and refuses multiple operations.
-   - **An account only counts if the user's own words name it** ("chequing", "checking", "chq", "savings", and so on). If the model returns an account the user never mentioned, it is treated as missing.
+   - **An account only counts if the user's own words name it** (`Accounts.cs`: "chequing", "checking", "chq", "savings", and so on). If the model returns an account the user never mentioned, it is treated as missing.
    - Transfers need both accounts named. A missing side is asked for, never filled in, even though there are only two accounts.
    - The command is built from these known values only. No text from the model is ever copied into it.
    - Anything missing gets a specific clarification message, and nothing runs.
@@ -107,7 +107,7 @@ DEPOSIT $10.00 TO savings | savings=$10.00
 bank> Move four dollars from savings to chequing
   [command: transfer savings chequing 4.00]
   [result: TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00]
-The transfer of $4.00 from your savings account to your chequing account was successful. Your savings balance is now $6.00, and your chequing balance is $4.00.
+The $4.00 has been successfully transferred from your savings account to your chequing account. Your savings balance is now $6.00, and your chequing balance is $4.00.
 bank> balance
 chequing=$4.00 | savings=$6.00
 ```
@@ -128,7 +128,7 @@ chequing=$0.00 | savings=$10.00
 bank> Move $3 from savings to chequing
   [command: transfer savings chequing 3.00]
   [result: TRANSFER $3.00 FROM savings TO chequing | savings=$7.00 | chequing=$3.00]
-The transfer of $3.00 from your savings account to your chequing account was successful. Your new savings balance is $7.00, and your chequing balance is $3.00.
+The transfer of $3.00 from your savings account to your chequing account was successful. Your savings balance is now $7.00, and your chequing balance is $3.00.
 ```
 
 Observed: the app named the missing detail (the amount) and ran no command; there is no `[command: ...]` line. Balances stayed at chequing $0.00 and savings $10.00. The complete follow-up request then worked normally.
@@ -143,7 +143,7 @@ DEPOSIT $10.00 TO chequing | chequing=$10.00
 bank> Withdraw $25 from chequing
   [command: withdraw chequing 25.00]
   [result: ERROR INSUFFICIENT_FUNDS | chequing=$10.00]
-The withdrawal of $25 from your chequing account didn't go through because there are insufficient funds. Your current balance in the chequing account is $10.00.
+The withdrawal of $25 from your chequing account did not go through because there are insufficient funds; your current chequing balance is $10.00.
 bank> balance
 chequing=$10.00 | savings=$0.00
 ```
@@ -179,7 +179,7 @@ These were run the same way, on the final code, and used the real API unless not
 
 ### Automated tests
 
-`dotnet test` runs 113 xUnit tests against the real `BankSession`, with a scripted fake in place of the API, in `BankingCli.Tests/`. They cover:
+`dotnet test` runs 122 xUnit tests against the real `BankSession`, with a scripted fake in place of the API, in `BankingCli.Tests/`. They cover:
 
 - Original commands give the same output as `BankSession` and make zero API calls.
 - Each of the four operations maps to exactly one command.

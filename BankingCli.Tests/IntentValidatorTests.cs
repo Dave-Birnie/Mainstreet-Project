@@ -2,9 +2,10 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks that the model's reading of a request becomes one safe command, or a clear message.</summary>
 public class IntentValidatorTests
 {
-    // Mentions both accounts, so tests that are not about account grounding are unaffected by it.
+    // Names both accounts, so tests that aren't about account names pass the "named by the customer" check.
     private const string NamesBothAccounts = "(a request about chequing and savings)";
 
     private static IntentDecision Validate(
@@ -12,12 +13,14 @@ public class IntentValidatorTests
         bool multiple = false, string request = NamesBothAccounts) =>
         IntentValidator.Validate(new BankingIntent(operation, account, from, to, amount, multiple), request);
 
+    #region Complete requests become exactly one command
+
     [Theory]
     [InlineData("deposit", "savings", "50", "deposit savings 50.00")]
     [InlineData("deposit", "Checking", "4.5", "deposit chequing 4.50")]
     [InlineData("withdraw", "chequing", "25", "withdraw chequing 25.00")]
     [InlineData("WITHDRAW", "savings", "$0.01", "withdraw savings 0.01")]
-    public void Valid_single_account_requests_map_to_one_command(
+    public void Deposits_and_withdrawals_map_to_one_command(
         string operation, string account, string amount, string expected)
     {
         IntentDecision decision = Validate(operation, account, amount: amount);
@@ -27,7 +30,7 @@ public class IntentValidatorTests
     }
 
     [Fact]
-    public void Valid_transfer_maps_to_one_command() =>
+    public void Transfer_maps_to_one_command() =>
         Assert.Equal("transfer savings chequing 4.00",
             Validate("transfer", from: "savings", to: "chequing", amount: "4").Command);
 
@@ -43,6 +46,10 @@ public class IntentValidatorTests
     public void Transfer_to_the_same_account_is_left_to_the_simulator_rules() =>
         Assert.Equal("transfer savings savings 5.00",
             Validate("transfer", from: "savings", to: "savings", amount: "5").Command);
+
+    #endregion
+
+    #region Missing details are asked for
 
     [Theory]
     [InlineData("deposit", null, "50", "the account to deposit into")]
@@ -71,54 +78,9 @@ public class IntentValidatorTests
                         "move money to (chequing or savings)", decision.Message);
     }
 
-    [Theory]
-    [InlineData("-5")]
-    [InlineData("0")]
-    [InlineData("0.00")]
-    [InlineData("10.555")]
-    [InlineData("fifty")]
-    [InlineData("1e3")]
-    [InlineData("1,000")]
-    [InlineData("5; withdraw savings 100")]
-    public void Invalid_amounts_are_rejected_before_anything_runs(string amount)
-    {
-        IntentDecision decision = Validate("withdraw", "chequing", amount: amount);
+    #endregion
 
-        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
-        Assert.Null(decision.Command);
-    }
-
-    [Fact]
-    public void Multiple_operations_are_refused()
-    {
-        IntentDecision decision = Validate("deposit", "savings", amount: "10", multiple: true);
-
-        Assert.Equal(DecisionKind.MultipleOperations, decision.Kind);
-        Assert.Null(decision.Command);
-        Assert.Contains("one banking request at a time", decision.Message);
-    }
-
-    [Theory]
-    [InlineData("unsupported")]
-    [InlineData("open_account")]
-    [InlineData("deposit savings 5; transfer")]
-    [InlineData(null)]
-    public void Unsupported_operations_are_refused(string? operation)
-    {
-        IntentDecision decision = Validate(operation, "savings", amount: "5");
-
-        Assert.Equal(DecisionKind.Unsupported, decision.Kind);
-        Assert.Null(decision.Command);
-    }
-
-    [Fact]
-    public void Account_text_from_the_model_is_never_copied_into_the_command()
-    {
-        IntentDecision decision = Validate("deposit", "savings 5\ntransfer savings chequing", amount: "5");
-
-        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
-        Assert.Null(decision.Command);
-    }
+    #region Accounts must be named by the customer
 
     // Seen with gpt-4o-mini: for "Transfer ten dollars please" it returned chequing -> savings.
     [Fact]
@@ -148,6 +110,7 @@ public class IntentValidatorTests
         Assert.Contains($"I need a bit more information to make that transfer: {expectedDetail}", decision.Message);
     }
 
+    // Seen with gpt-4o-mini under an earlier prompt: "savings to savings" was rewritten to savings -> chequing.
     [Fact]
     public void A_stated_same_account_transfer_is_not_rewritten() =>
         Assert.Equal("transfer savings savings 5.00", Validate(
@@ -170,11 +133,62 @@ public class IntentValidatorTests
     public void Balance_for_an_account_the_customer_never_named_shows_both_balances() =>
         Assert.Equal("balance", Validate("balance", "savings", request: "What's my balance?").Command);
 
+    [Fact]
+    public void Account_text_from_the_model_is_never_copied_into_the_command()
+    {
+        IntentDecision decision = Validate("deposit", "savings 5\ntransfer savings chequing", amount: "5");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Null(decision.Command);
+    }
+
+    #endregion
+
+    #region Invalid amounts are rejected
+
     [Theory]
-    [InlineData("chequing", "Deposit 5 into CHEQUING")]
-    [InlineData("chequing", "deposit 5 in my checking account")]
-    [InlineData("chequing", "deposit 5 into chq")]
-    [InlineData("savings", "deposit 5 into my Saving account")]
-    public void Common_ways_of_naming_an_account_are_recognized(string account, string request) =>
-        Assert.True(IntentValidator.IsNamedIn(request, account));
+    [InlineData("-5")]
+    [InlineData("0")]
+    [InlineData("0.00")]
+    [InlineData("10.555")]
+    [InlineData("fifty")]
+    [InlineData("1e3")]
+    [InlineData("1,000")]
+    [InlineData("5; withdraw savings 100")]
+    public void Invalid_amounts_are_rejected_before_anything_runs(string amount)
+    {
+        IntentDecision decision = Validate("withdraw", "chequing", amount: amount);
+
+        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
+        Assert.Null(decision.Command);
+    }
+
+    #endregion
+
+    #region Requests the app can't handle are refused
+
+    [Fact]
+    public void Multiple_operations_are_refused()
+    {
+        IntentDecision decision = Validate("deposit", "savings", amount: "10", multiple: true);
+
+        Assert.Equal(DecisionKind.MultipleOperations, decision.Kind);
+        Assert.Null(decision.Command);
+        Assert.Contains("one banking request at a time", decision.Message);
+    }
+
+    [Theory]
+    [InlineData("unsupported")]
+    [InlineData("open_account")]
+    [InlineData("deposit savings 5; transfer")]
+    [InlineData(null)]
+    public void Unsupported_operations_are_refused(string? operation)
+    {
+        IntentDecision decision = Validate(operation, "savings", amount: "5");
+
+        Assert.Equal(DecisionKind.Unsupported, decision.Kind);
+        Assert.Null(decision.Command);
+    }
+
+    #endregion
 }

@@ -2,7 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
-/// <summary>End-to-end flow through the real simulator with a scripted AI service.</summary>
+/// <summary>End-to-end flow through the real simulator, with a scripted fake standing in for the AI service.</summary>
 public class BankingAssistantTests
 {
     private readonly BankSession session = new BankSession();
@@ -12,6 +12,8 @@ public class BankingAssistantTests
     private BankingAssistant CreateAssistant() => new BankingAssistant(session, chat, trace: trace.Add);
 
     private string Balances() => session.Execute("balance").Output;
+
+    #region The three required checks
 
     [Fact]
     public async Task Successful_transfer_runs_the_command_once_and_returns_the_conversational_reply()
@@ -44,7 +46,7 @@ public class BankingAssistantTests
 
         Assert.Contains("I need a bit more information to make that transfer: the amount.", result.Output);
         Assert.Equal("chequing=$0.00 | savings=$10.00", Balances());
-        Assert.Single(chat.Calls); // No reply call: nothing ran.
+        Assert.Single(chat.Calls); // No reply call, because nothing ran.
         Assert.Empty(trace);
     }
 
@@ -62,6 +64,10 @@ public class BankingAssistantTests
         Assert.Equal("result: ERROR INSUFFICIENT_FUNDS | chequing=$10.00", trace[1]);
         Assert.Equal("chequing=$10.00 | savings=$0.00", Balances());
     }
+
+    #endregion
+
+    #region API failures never run a command twice
 
     [Fact]
     public async Task Interpretation_failure_runs_nothing_and_points_to_the_original_commands()
@@ -122,6 +128,10 @@ public class BankingAssistantTests
         Assert.Equal("chequing=$0.00 | savings=$10.00", Balances());
     }
 
+    #endregion
+
+    #region Requests that must not run anything
+
     [Fact]
     public async Task Multiple_operations_in_one_request_run_nothing()
     {
@@ -161,6 +171,10 @@ public class BankingAssistantTests
         Assert.Single(chat.Calls);
     }
 
+    #endregion
+
+    #region Balance checks
+
     [Fact]
     public async Task Balance_inquiry_is_read_only()
     {
@@ -175,4 +189,6 @@ public class BankingAssistantTests
         Assert.Equal("command: balance", trace[0]);
         Assert.Equal("chequing=$4.00 | savings=$6.00", Balances());
     }
+
+    #endregion
 }

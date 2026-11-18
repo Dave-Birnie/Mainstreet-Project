@@ -1,29 +1,17 @@
 using BankingCli;
 using BankingCli.NaturalLanguage;
 
+#region Setup
+
 BankSession banking = new BankSession();
 bool interactive = !Console.IsInputRedirected;
-Action<string>? trace = args.Contains("--show-commands") ? line => Console.WriteLine($"  [{line}]") : null;
+bool showCommands = args.Contains("--show-commands");
 
-BankingAssistant assistant;
-if (AiSettings.TryLoad(Environment.GetEnvironmentVariable, out AiSettings? settings, out string problem))
-{
-    assistant = new BankingAssistant(banking, new OpenAiCompatibleChatClient(new HttpClient(), settings!), trace: trace);
-    if (interactive)
-    {
-        Console.WriteLine($"Natural-language requests are on (model: {settings!.Model}). " +
-                          "Type a request such as \"Move $4 from savings to chequing\", or help for commands.");
-    }
-}
-else
-{
-    string notice = $"Natural-language requests are off: {problem} Original commands still work. See README.md to enable them.";
-    assistant = new BankingAssistant(banking, chatClient: null, unavailableNotice: interactive ? notice : null);
-    if (interactive)
-    {
-        Console.WriteLine(notice);
-    }
-}
+BankingAssistant assistant = CreateAssistant(banking, interactive, showCommands);
+
+#endregion
+
+#region Read, run, print (the starter's loop, now calling the assistant)
 
 while (true)
 {
@@ -50,3 +38,38 @@ while (true)
         break;
     }
 }
+
+#endregion
+
+#region Helpers
+
+// Turns on natural-language requests when an API key is configured.
+// Without one, the app behaves exactly like the original starter.
+static BankingAssistant CreateAssistant(BankSession banking, bool interactive, bool showCommands)
+{
+    if (!AiSettings.TryLoad(Environment.GetEnvironmentVariable, out AiSettings? settings, out string problem))
+    {
+        string notice = $"Natural-language requests are off: {problem} Original commands still work. " +
+                        "See README.md to enable them.";
+        if (interactive)
+        {
+            Console.WriteLine(notice);
+        }
+
+        return new BankingAssistant(banking, chatClient: null, unavailableNotice: interactive ? notice : null);
+    }
+
+    if (interactive)
+    {
+        Console.WriteLine($"Natural-language requests are on (model: {settings!.Model}). " +
+                          "Type a request such as \"Move $4 from savings to chequing\", or help for commands.");
+    }
+
+    // --show-commands prints the simulator command and raw result under each English request.
+    Action<string>? trace = showCommands ? line => Console.WriteLine($"  [{line}]") : null;
+
+    OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient(new HttpClient(), settings!);
+    return new BankingAssistant(banking, chatClient, trace: trace);
+}
+
+#endregion

@@ -2,6 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks how the API settings are read from environment variables.</summary>
 public class AiSettingsTests
 {
     private static Func<string, string?> Env(params (string Name, string Value)[] variables) =>

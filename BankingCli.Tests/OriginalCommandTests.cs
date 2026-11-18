@@ -2,6 +2,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks that original commands keep their exact behaviour and never call the API.</summary>
 public class OriginalCommandTests
 {
     // The README transcript plus help, ? and malformed commands that must keep the simulator's own errors.

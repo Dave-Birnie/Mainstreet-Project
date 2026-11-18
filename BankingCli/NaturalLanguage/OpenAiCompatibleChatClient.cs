@@ -7,35 +7,22 @@ using System.Text.Json.Nodes;
 namespace BankingCli.NaturalLanguage;
 
 /// <summary>
-/// Minimal client for the <c>/chat/completions</c> endpoint shared by OpenAI and OpenAI-compatible providers.
-/// It makes exactly one request per call and never retries.
+/// A small client for the <c>/chat/completions</c> endpoint used by OpenAI and OpenAI-compatible providers.
+/// Each call makes exactly one HTTP request and never retries.
 /// </summary>
 internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettings settings) : IChatClient
 {
+    // Long error text from the provider is cut to this many characters.
     private const int MaxProviderMessageLength = 200;
+
+    #region Sending a request
 
     public async Task<string> CompleteAsync(
         IReadOnlyList<ChatMessage> messages, bool requireJson, CancellationToken cancellationToken)
     {
-        JsonObject body = new JsonObject
-        {
-            ["model"] = settings.Model,
-            ["messages"] = new JsonArray(messages
-                .Select(message => (JsonNode)new JsonObject { ["role"] = message.Role, ["content"] = message.Content })
-                .ToArray())
-        };
+        using HttpRequestMessage request = BuildRequest(messages, requireJson);
 
-        if (requireJson)
-        {
-            body["response_format"] = new JsonObject { ["type"] = "json_object" };
-        }
-
-        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, settings.ChatCompletionsUri)
-        {
-            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
-
+        // Give up after the configured timeout, or sooner if the caller cancels.
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(settings.Timeout);
 
@@ -49,7 +36,7 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
                 throw new AiServiceException(DescribeHttpError(response.StatusCode, responseText));
             }
 
-            return ReadMessageContent(responseText);
+            return ReadReplyText(responseText);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -63,72 +50,123 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
         }
     }
 
-    private static string ReadMessageContent(string responseText)
+    /// <summary>Builds the POST request: model, messages, optional JSON mode, and the API key.</summary>
+    private HttpRequestMessage BuildRequest(IReadOnlyList<ChatMessage> messages, bool requireJson)
     {
-        string? text;
+        JsonArray chat = new JsonArray();
+        foreach (ChatMessage message in messages)
+        {
+            chat.Add(new JsonObject { ["role"] = message.Role, ["content"] = message.Content });
+        }
+
+        JsonObject body = new JsonObject
+        {
+            ["model"] = settings.Model,
+            ["messages"] = chat
+        };
+
+        if (requireJson)
+        {
+            body["response_format"] = new JsonObject { ["type"] = "json_object" };
+        }
+
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, settings.ChatCompletionsUri)
+        {
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
+        return request;
+    }
+
+    #endregion
+
+    #region Reading the reply
+
+    /// <summary>Pulls the reply text out of a successful response.</summary>
+    /// <exception cref="AiServiceException">The response isn't the expected JSON, or the reply is empty.</exception>
+    private static string ReadReplyText(string responseText)
+    {
+        JsonNode? root;
         try
         {
-            using JsonDocument document = JsonDocument.Parse(responseText);
-            text = document.RootElement.ValueKind == JsonValueKind.Object
-                   && document.RootElement.TryGetProperty("choices", out JsonElement choices)
-                   && choices.ValueKind == JsonValueKind.Array
-                   && choices.GetArrayLength() > 0
-                   && choices[0].ValueKind == JsonValueKind.Object
-                   && choices[0].TryGetProperty("message", out JsonElement message)
-                   && message.ValueKind == JsonValueKind.Object
-                   && message.TryGetProperty("content", out JsonElement content)
-                   && content.ValueKind == JsonValueKind.String
-                ? content.GetString()
-                : null;
+            root = JsonNode.Parse(responseText);
         }
         catch (JsonException ex)
         {
             throw new AiServiceException("the AI service returned a response that was not valid JSON.", ex);
         }
 
-        return string.IsNullOrWhiteSpace(text)
-            ? throw new AiServiceException("the AI service returned an empty reply.")
-            : text;
+        // Expected shape: { "choices": [ { "message": { "content": "..." } } ] }
+        if (root is JsonObject response
+            && response["choices"] is JsonArray { Count: > 0 } choices
+            && choices[0] is JsonObject firstChoice
+            && firstChoice["message"] is JsonObject message
+            && message["content"] is JsonValue content
+            && content.TryGetValue(out string? text)
+            && !string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        throw new AiServiceException("the AI service returned an empty reply.");
     }
 
+    #endregion
+
+    #region Error messages
+
+    /// <summary>Turns an HTTP error into a short explanation that says what to check.</summary>
     private string DescribeHttpError(HttpStatusCode status, string responseText)
     {
         int code = (int)status;
         return status switch
         {
-            // Never echo the provider's text here: some providers include part of the key in it.
+            // Never repeat the provider's text here: some providers include part of the key in it.
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                 $"the AI service rejected the API key (HTTP {code}). Check {AiSettings.ApiKeyVariable}.",
+
             HttpStatusCode.NotFound =>
                 $"the AI service returned HTTP 404. Check {AiSettings.EndpointVariable} and that model " +
                 $"\"{settings.Model}\" exists ({ProviderMessage(responseText)}).",
+
             HttpStatusCode.TooManyRequests =>
-                $"the AI service is rate limiting requests or the account is out of quota (HTTP 429).",
+                "the AI service is rate limiting requests or the account is out of quota (HTTP 429).",
+
             _ => $"the AI service returned HTTP {code} ({ProviderMessage(responseText)})."
         };
     }
 
+    /// <summary>The provider's own error message, on one line and shortened, or "no details".</summary>
     private static string ProviderMessage(string responseText)
     {
-        string message;
+        string? message;
         try
         {
-            JsonNode? error = JsonNode.Parse(responseText)?["error"];
-            message = error?.GetValueKind() == JsonValueKind.Object
-                ? error["message"]?.ToString() ?? "no details"
-                : error?.ToString() ?? "no details";
+            // Usually { "error": { "message": "..." } }, but some providers send { "error": "..." }.
+            message = JsonNode.Parse(responseText) is JsonObject response
+                ? response["error"] switch
+                {
+                    JsonObject error => error["message"]?.ToString(),
+                    JsonNode error => error.ToString(),
+                    null => null
+                }
+                : null;
         }
         catch (JsonException)
         {
-            message = responseText.Trim();
+            message = responseText.Trim(); // Not JSON, e.g. an HTML error page.
         }
 
-        message = message.ReplaceLineEndings(" ");
-        if (message.Length == 0)
+        message = message?.ReplaceLineEndings(" ");
+        if (string.IsNullOrEmpty(message))
         {
             return "no details";
         }
 
-        return message.Length <= MaxProviderMessageLength ? message : message[..MaxProviderMessageLength] + "...";
+        return message.Length <= MaxProviderMessageLength
+            ? message
+            : message[..MaxProviderMessageLength] + "...";
     }
+
+    #endregion
 }

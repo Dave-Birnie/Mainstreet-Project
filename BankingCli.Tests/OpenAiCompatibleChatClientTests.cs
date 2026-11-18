@@ -4,6 +4,7 @@ using BankingCli.NaturalLanguage;
 
 namespace BankingCli.Tests;
 
+/// <summary>Checks the HTTP requests sent to the API and the errors shown when it fails.</summary>
 public class OpenAiCompatibleChatClientTests
 {
     private static readonly AiSettings Settings = new AiSettings(
@@ -15,6 +16,8 @@ public class OpenAiCompatibleChatClientTests
     private static Task<string> Send(StubHttpHandler handler, bool requireJson = false, AiSettings? settings = null) =>
         new OpenAiCompatibleChatClient(new HttpClient(handler), settings ?? Settings)
             .CompleteAsync(Messages, requireJson, CancellationToken.None);
+
+    #region Sending requests
 
     [Fact]
     public async Task Posts_an_openai_compatible_request_and_returns_the_message_content()
@@ -46,6 +49,10 @@ public class OpenAiCompatibleChatClientTests
 
         Assert.Null(JsonNode.Parse(handler.LastRequestBody!)!["response_format"]);
     }
+
+    #endregion
+
+    #region Errors are short, readable, and never retried
 
     [Fact]
     public async Task Rejected_key_gives_an_understandable_error_without_echoing_provider_text()
@@ -108,4 +115,18 @@ public class OpenAiCompatibleChatClientTests
 
         await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
     }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("")]
+    public async Task Server_errors_without_details_still_give_a_readable_message(string body)
+    {
+        StubHttpHandler handler = StubHttpHandler.Json(HttpStatusCode.InternalServerError, body);
+
+        AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
+
+        Assert.Equal("the AI service returned HTTP 500 (no details).", error.Message);
+    }
+
+    #endregion
 }
