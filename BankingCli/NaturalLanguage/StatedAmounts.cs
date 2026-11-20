@@ -24,6 +24,13 @@ internal static partial class StatedAmounts
     /// </summary>
     public static bool HasNumberTooLargeToRead(string request) => Read(request).TooLarge;
 
+    /// <summary>True when the customer typed a number with more than two decimal places, such as "1.230".</summary>
+    public static bool HasTooManyDecimalPlaces(string request) =>
+        TokenPattern().Matches(request).Any(match =>
+            match.Groups["number"].Success
+            && match.Value.Contains('.')
+            && match.Value.Length - match.Value.IndexOf('.') - 1 > 2);
+
     #endregion
 
     #region Reading the text
@@ -60,6 +67,14 @@ internal static partial class StatedAmounts
 
             decimal amount = read.Value;
             AddCents(tokens, ref position, ref amount);
+
+            // "fifty cents" is $0.50.
+            if (position < tokens.Count && tokens[position].Text is "cent" or "cents")
+            {
+                amount /= 100m;
+                position++;
+            }
+
             if (!amounts.Contains(amount))
             {
                 amounts.Add(amount);
@@ -69,8 +84,8 @@ internal static partial class StatedAmounts
         return new Reading(amounts, tooLarge);
     }
 
-    // Numbers such as "-5", "1,000" or "4.50", and words such as "twenty".
-    [GeneratedRegex(@"(?<number>-?\d[\d,]*(?:\.\d+)?)|(?<word>[a-z]+)")]
+    // Numbers such as "-5", "1,000", "4.50" or ".50", and words such as "twenty".
+    [GeneratedRegex(@"(?<number>-?(?:\d[\d,]*(?:\.\d+)?|\.\d+))|(?<word>[a-z]+)", RegexOptions.IgnoreCase)]
     private static partial Regex TokenPattern();
 
     #endregion

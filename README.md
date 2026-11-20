@@ -8,7 +8,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```sh
 dotnet build                      # build
-dotnet test                       # run the 254 automated tests (no API key needed)
+dotnet test                       # run the 271 automated tests (no API key needed)
 dotnet run --project BankingCli   # start the app; type exit to quit
 ```
 
@@ -89,7 +89,7 @@ I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, starting each in a fresh se
 ### Other checks
 - **API failures:** with the endpoint pointed at a closed port, nothing ran and the app explained how to fix it. When a test server failed only the reply, the app showed the simulator's own result, and the command ran exactly once.
 - **Original commands:** with piped input, a script of original commands produced output identical to the starter app's.
-- **Automated tests:** 254 tests run against the real simulator, with a fake standing in for the API. They include every reply the two models wrote during testing (all accepted), and misleading replies that must be rejected.
+- **Automated tests:** 271 tests run against the real simulator, with a fake standing in for the API. They include every reply the two models wrote during testing (all accepted), and misleading replies that must be rejected.
 
 ## How it works
 
@@ -98,15 +98,17 @@ I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, starting each in a fresh se
    - Accounts and amounts must appear in what you typed.
    - Missing details are asked for.
    - A request with two different amounts ("$5 or $10") is asked about, not guessed.
+   - A deposit or withdrawal that names both accounts is asked about too.
+   - A transfer must match your own "from" and "to" words.
 3. The app runs **one** simulator command, built from the checked values.
-4. The API writes the reply from the simulator's real result. Before it's shown, the app checks the reply's amounts, balances, accounts and outcome against that result. If the check fails, or the API fails, the app shows the simulator's own result instead. The command never runs twice.
+4. The API writes the reply from the simulator's real result. Before it's shown, the app checks the reply's amounts, balances, direction, type of transaction, outcome and decline reason against that result. If the check fails, or the API fails, the app shows the simulator's own result instead. The command never runs twice.
 
 ## How I worked
 
 - **Tools:** Claude Code (Anthropic) wrote the code, tests and README, and ran the checks against the real APIs. ChatGPT reviewed the work against the brief.
 - **Workflow:** I turned the email into a requirements plan, directed the work, and tested it myself. My own testing found that a huge amount gave the wrong error, and that "1k" wasn't understood. Both were fixed.
 - **A suggestion I rejected:** for a transfer naming only one account ("Move $4 to chequing"), Claude Code's version filled in the other account. I rejected that because the brief says to ask for missing details. To verify, I re-ran the request (it now asks which account to use), and unit tests lock that behaviour in.
-- **Reviews acted on:** two reviews found replies that misstated the result, such as the wrong balance, the wrong direction, or a decline described as done. They also found amounts the model could choose or invent. Each case is now a regression test, and the reply checker reads each dollar amount in context. Re-running every check on both models produced no false alarms.
+- **Reviews acted on:** three reviews fed the app deliberately wrong model output through a test server. They found replies the checker let through (a wrong balance, a reversed direction, "I withdrew" after a transfer, an invented reason for a decline) and requests where the model could pick an amount or account. Each case is now a regression test. Re-running every check on both real models produced no false alarms.
 
 ## Limitations
 

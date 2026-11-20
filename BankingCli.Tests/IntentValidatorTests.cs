@@ -5,14 +5,20 @@ namespace BankingCli.Tests;
 /// <summary>Checks that the model's reading of a request becomes one safe command, or a clear message.</summary>
 public class IntentValidatorTests
 {
-    // By default the request names both accounts and the amount, so tests that aren't about
-    // the "the customer must have written it" checks pass them.
+    // By default the request names exactly the accounts and amount in the intent, so tests that aren't
+    // about the "the customer must have written it" checks pass them.
     private static IntentDecision Validate(
         string? operation, string? account = null, string? from = null, string? to = null, string? amount = null,
         bool multiple = false, string? request = null) =>
         IntentValidator.Validate(
             new BankingIntent(operation, account, from, to, amount, multiple),
-            request ?? $"(a request about chequing and savings for {amount})");
+            request ?? DefaultRequest(account, from, to, amount));
+
+    private static string DefaultRequest(string? account, string? from, string? to, string? amount)
+    {
+        string accounts = account ?? (from is null && to is null ? "" : $"from {from} to {to}");
+        return $"(a request about {accounts} for {amount})";
+    }
 
     #region Complete requests become exactly one command
 
@@ -180,10 +186,20 @@ public class IntentValidatorTests
     [InlineData("fifty")]
     [InlineData("1e3")]
     [InlineData("1,000")]
-    [InlineData("5; withdraw savings 100")]
     public void Invalid_amounts_are_rejected_before_anything_runs(string amount)
     {
         IntentDecision decision = Validate("withdraw", "chequing", amount: amount);
+
+        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
+        Assert.Null(decision.Command);
+    }
+
+    // A model "amount" carrying extra command text is never copied into a command.
+    [Fact]
+    public void An_amount_with_command_text_in_it_is_rejected()
+    {
+        IntentDecision decision = Validate(
+            "withdraw", "chequing", amount: "5; withdraw savings 100", request: "Withdraw 5 from chequing");
 
         Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
         Assert.Null(decision.Command);
@@ -267,6 +283,52 @@ public class IntentValidatorTests
     public void Three_decimal_places_are_rejected_like_the_original_command() =>
         Assert.Equal(DecisionKind.InvalidAmount,
             Validate("deposit", "savings", amount: "1.230", request: "Put $1.230 into savings").Kind);
+
+    #endregion
+
+    #region Cases from the third review
+
+    [Fact]
+    public void A_deposit_naming_both_accounts_asks_which_one()
+    {
+        IntentDecision decision = Validate("deposit", "savings", amount: "5", request: "Deposit $5 into savings or chequing");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.StartsWith("Your request mentions both chequing and savings.", decision.Message);
+    }
+
+    // The model reversed the direction the customer wrote.
+    [Fact]
+    public void A_reversed_transfer_direction_is_asked_about()
+    {
+        IntentDecision decision = Validate("transfer", from: "chequing", to: "savings", amount: "4",
+            request: "Move four dollars from savings to chequing");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.StartsWith("I couldn't tell which way to move the money.", decision.Message);
+    }
+
+    [Theory]
+    [InlineData("Move four dollars from savings to chequing")]
+    [InlineData("Move $4 to chequing from savings")]
+    [InlineData("Move $4 out of savings into chequing")]
+    [InlineData("Move $4 savings to chequing")]
+    public void A_transfer_in_the_customer_s_direction_runs(string request) =>
+        Assert.Equal("transfer savings chequing 4.00",
+            Validate("transfer", from: "savings", to: "chequing", amount: "4", request: request).Command);
+
+    [Theory]
+    [InlineData("Put fifty cents into savings", "0.50", "deposit savings 0.50")]
+    [InlineData("Put $.50 into savings", "0.50", "deposit savings 0.50")]
+    [InlineData("Put $.50 into savings", ".50", "deposit savings 0.50")]
+    public void Cents_are_understood(string request, string modelAmount, string expected) =>
+        Assert.Equal(expected, Validate("deposit", "savings", amount: modelAmount, request: request).Command);
+
+    // The model shortened 1.230 to 1.23, but the customer typed three decimal places.
+    [Fact]
+    public void Three_decimal_places_are_rejected_even_if_the_model_drops_one() =>
+        Assert.Equal(DecisionKind.InvalidAmount,
+            Validate("deposit", "savings", amount: "1.23", request: "Put $1.230 into savings").Kind);
 
     #endregion
 

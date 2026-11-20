@@ -29,6 +29,11 @@ internal static partial class ReplyCheck
             return "it mentioned an amount the simulator didn't report";
         }
 
+        if (AmountInWords().IsMatch(reply))
+        {
+            return "it wrote an amount in words instead of as a figure";
+        }
+
         if (!UsesEachAmountCorrectly(reply, facts))
         {
             return "it gave a wrong amount or balance";
@@ -39,11 +44,21 @@ internal static partial class ReplyCheck
             return "it named the wrong account";
         }
 
+        if (!DescribesTheRightOperation(reply, facts))
+        {
+            return "it described a different kind of transaction";
+        }
+
         if (!DescribesTheRightOutcome(reply, facts))
         {
             return facts.WasDeclined
                 ? "it didn't say the request was declined"
                 : "it said a successful request didn't go through";
+        }
+
+        if (!GivesTheRealReason(reply, facts))
+        {
+            return "it gave a different reason for the decline";
         }
 
         return null;
@@ -53,6 +68,8 @@ internal static partial class ReplyCheck
 
     #region What the simulator reported
 
+    /// <param name="Operation">"deposit", "withdraw", "transfer" or "balance".</param>
+    /// <param name="ErrorCode">The simulator's error code, such as INSUFFICIENT_FUNDS, or null on success.</param>
     /// <param name="IsBalanceCheck">True for a balance command, which moves no money.</param>
     /// <param name="RequestedAmount">The amount in the command, or null for a balance check.</param>
     /// <param name="FromAccount">The account money comes out of: a withdrawal's account, or a transfer's source.</param>
@@ -60,6 +77,8 @@ internal static partial class ReplyCheck
     /// <param name="Balances">Each balance in the result, such as savings = 6.00.</param>
     /// <param name="WasDeclined">True when the result starts with ERROR.</param>
     private sealed record Facts(
+        string Operation,
+        string? ErrorCode,
         bool IsBalanceCheck,
         decimal? RequestedAmount,
         string? FromAccount,
@@ -93,8 +112,8 @@ internal static partial class ReplyCheck
                 }
             }
 
-            bool wasDeclined = SimulatorErrors.Code(simulatorResult) is not null;
-            return new Facts(isBalanceCheck, requested, from, to, balances, wasDeclined);
+            string? errorCode = SimulatorErrors.Code(simulatorResult);
+            return new Facts(operation, errorCode, isBalanceCheck, requested, from, to, balances, errorCode is not null);
         }
 
         /// <summary>True when the amount is the requested amount or one of the reported balances.</summary>
@@ -137,7 +156,43 @@ internal static partial class ReplyCheck
     /// </summary>
     private static bool UsesEachAmountCorrectly(string reply, Facts facts)
     {
-        foreach (string clause in ClauseBreaks().Split(reply))
+        foreach (string sentence in SentenceBreaks().Split(reply))
+        {
+            // "Your savings and chequing balances are $6.00 and $4.00, respectively" pairs them in order.
+            if (RespectivelyWord().IsMatch(sentence))
+            {
+                if (!PairsRespectively(sentence, facts))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!ClausesUseAmountsCorrectly(sentence, facts))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Pairs the accounts and the balances in the order they're written.</summary>
+    private static bool PairsRespectively(string sentence, Facts facts)
+    {
+        List<string> accounts = AccountWords().Matches(sentence).Select(match => AccountFor(match.Value)).ToList();
+        List<decimal> amounts = DollarAmountPattern().Matches(sentence)
+            .Select(match => TryReadAmount(match, out decimal amount) ? amount : -1m)
+            .ToList();
+
+        return accounts.Count == amounts.Count
+               && accounts.Zip(amounts).All(pair => facts.IsBalanceOf(pair.First, pair.Second));
+    }
+
+    private static bool ClausesUseAmountsCorrectly(string sentence, Facts facts)
+    {
+        foreach (string clause in ClauseBreaks().Split(sentence))
         {
             List<Match> amounts = DollarAmountPattern().Matches(clause).ToList();
             for (int i = 0; i < amounts.Count; i++)
@@ -206,10 +261,21 @@ internal static partial class ReplyCheck
     private static string? NearestAccount(string clause, int position) =>
         AccountWords().Matches(clause)
             .OrderBy(match => Math.Abs(match.Index - position))
-            .Select(match => match.Value.StartsWith("s", StringComparison.OrdinalIgnoreCase)
-                ? Accounts.Savings
-                : Accounts.Chequing)
+            .Select(match => AccountFor(match.Value))
             .FirstOrDefault();
+
+    private static string AccountFor(string word) =>
+        word.StartsWith("s", StringComparison.OrdinalIgnoreCase) ? Accounts.Savings : Accounts.Chequing;
+
+    [GeneratedRegex(@"[.;!?](?=\s|$)")]
+    private static partial Regex SentenceBreaks();
+
+    [GeneratedRegex(@"\brespectively\b", RegexOptions.IgnoreCase)]
+    private static partial Regex RespectivelyWord();
+
+    // "six dollars", "4 dollars", "fifty cents": amounts that should have been written as "$6.00".
+    [GeneratedRegex(@"\b(?:\d[\d,]*(?:\.\d+)?|a|an|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)\s+(?:dollars?|bucks?|cents?)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex AmountInWords();
 
     // Sentence ends, commas and semicolons followed by a space, and joining words. "$1,046.00" isn't split.
     [GeneratedRegex(@"[.;!?](?=\s|$)|,(?=\s)|\b(?:and|but|while|whereas|so)\b", RegexOptions.IgnoreCase)]
@@ -257,7 +323,77 @@ internal static partial class ReplyCheck
 
     #endregion
 
-    #region Check 4: success and decline are described correctly
+    #region Check 4: the right kind of transaction is described
+
+    /// <summary>A transfer mustn't be described as a withdrawal or deposit, and so on. "I withdrew $4.00" after a transfer fails.</summary>
+    private static bool DescribesTheRightOperation(string reply, Facts facts) => facts.Operation switch
+    {
+        "deposit" => !WithdrawalWords().IsMatch(reply) && !TransferWords().IsMatch(reply),
+        "withdraw" => !DepositWords().IsMatch(reply) && !TransferWords().IsMatch(reply),
+        "transfer" => !WithdrawalWords().IsMatch(reply) && !DepositWords().IsMatch(reply),
+        _ => true
+    };
+
+    [GeneratedRegex(@"\bwithdr\w*|\btook\s+out\b|\btaken\s+out\b", RegexOptions.IgnoreCase)]
+    private static partial Regex WithdrawalWords();
+
+    [GeneratedRegex(@"\bdeposit\w*", RegexOptions.IgnoreCase)]
+    private static partial Regex DepositWords();
+
+    [GeneratedRegex(@"\btransfer\w*", RegexOptions.IgnoreCase)]
+    private static partial Regex TransferWords();
+
+    #endregion
+
+    #region Check 6: a decline gives the simulator's reason, not another one
+
+    /// <summary>
+    /// A declined request must give the simulator's actual reason ("insufficient funds", "the same account"),
+    /// and mustn't invent another one ("your account is frozen").
+    /// </summary>
+    private static bool GivesTheRealReason(string reply, Facts facts)
+    {
+        if (!facts.WasDeclined)
+        {
+            return true;
+        }
+
+        if (InventedReasons().IsMatch(reply))
+        {
+            return false;
+        }
+
+        Regex? realReason = facts.ErrorCode switch
+        {
+            "INSUFFICIENT_FUNDS" => InsufficientFundsReason(),
+            "SAME_ACCOUNT" => SameAccountReason(),
+            "INVALID_AMOUNT" => InvalidAmountReason(),
+            "BALANCE_LIMIT" => BalanceLimitReason(),
+            _ => null
+        };
+
+        return realReason is null || realReason.IsMatch(reply);
+    }
+
+    [GeneratedRegex(@"\binsufficient\b|\benough\b|\bonly\s+(?:has|have|had)\b|\bonly\s+\$", RegexOptions.IgnoreCase)]
+    private static partial Regex InsufficientFundsReason();
+
+    [GeneratedRegex(@"\bsame\s+account\b|\bdifferent\s+accounts?\b|\btwo\s+(?:different\s+)?accounts\b|\bitself\b", RegexOptions.IgnoreCase)]
+    private static partial Regex SameAccountReason();
+
+    [GeneratedRegex(@"\bamount\b|\binvalid\b|\blimit\b", RegexOptions.IgnoreCase)]
+    private static partial Regex InvalidAmountReason();
+
+    [GeneratedRegex(@"\blimit\b|\bmaximum\b", RegexOptions.IgnoreCase)]
+    private static partial Regex BalanceLimitReason();
+
+    // Reasons the simulator never gives.
+    [GeneratedRegex(@"\b(?:frozen|freeze|locked|suspended|fraud\w*|closed|blocked|overdrawn|overdraft)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex InventedReasons();
+
+    #endregion
+
+    #region Check 5: success and decline are described correctly
 
     /// <summary>
     /// A declined request must be described with a clear decline ("was declined", "couldn't", "insufficient funds")

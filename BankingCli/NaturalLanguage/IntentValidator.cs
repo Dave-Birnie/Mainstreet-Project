@@ -94,6 +94,14 @@ internal static partial class IntentValidator
     private static IntentDecision ValidateSingleAccount(
         string command, BankingIntent intent, string request, string action, string accountDetail, string example)
     {
+        // "Deposit $5 into savings or chequing" names both accounts, so don't let the model pick one.
+        if (Accounts.IsNamedIn(request, Accounts.Chequing) && Accounts.IsNamedIn(request, Accounts.Savings))
+        {
+            return IntentDecision.Decline(DecisionKind.MissingDetails,
+                $"Your request mentions both chequing and savings. Please send it again with just {accountDetail}, " +
+                $"for example \"{example}\". {NothingChanged}");
+        }
+
         string? account = NamedAccount(intent.Account, request);
         AmountCheck amountCheck = CheckAmount(intent.Amount, request, out string amount);
 
@@ -125,6 +133,18 @@ internal static partial class IntentValidator
         string? from = NamedAccount(intent.FromAccount, request);
         string? to = NamedAccount(intent.ToAccount, request);
         AmountCheck amountCheck = CheckAmount(intent.Amount, request, out string amount);
+
+        // The direction must match the customer's own "from" and "to" words, so a reversed reading can't run.
+        string? statedFrom = Accounts.StatedSource(request);
+        string? statedTo = Accounts.StatedDestination(request);
+        bool contradictsFrom = statedFrom is not null && from is not null && statedFrom != from;
+        bool contradictsTo = statedTo is not null && to is not null && statedTo != to;
+        if (contradictsFrom || contradictsTo)
+        {
+            return IntentDecision.Decline(DecisionKind.MissingDetails,
+                "I couldn't tell which way to move the money. Please send it again with both accounts, for example " +
+                $"\"Move $20 from savings to chequing\". {NothingChanged}");
+        }
 
         List<string> missing = new List<string>();
         if (amountCheck == AmountCheck.Missing)
@@ -239,8 +259,9 @@ internal static partial class IntentValidator
             return AmountCheck.Ambiguous;
         }
 
-        // Decimal places are counted in the text, because reading a very long number can round it.
-        if (amount <= 0m || DecimalPlaces(trimmed) > 2)
+        // Decimal places are counted as written, by the model and by the customer: "$1.230" is invalid
+        // even if the model shortens it to 1.23.
+        if (amount <= 0m || DecimalPlaces(trimmed) > 2 || StatedAmounts.HasTooManyDecimalPlaces(request))
         {
             return AmountCheck.Invalid;
         }

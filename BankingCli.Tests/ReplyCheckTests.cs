@@ -105,7 +105,7 @@ public class ReplyCheckTests
     [Theory]
     [InlineData("Your withdrawal of $25.00 could not be completed because chequing doesn't have enough money.")]
     [InlineData("Your withdrawal of $25.00 was not successful, because chequing only has $10.00.")]
-    [InlineData("The withdrawal of $25.00 wasn't completed. Your chequing balance is still $10.00.")]
+    [InlineData("The withdrawal of $25.00 wasn't completed, because chequing doesn't have enough. Your chequing balance is still $10.00.")]
     public void Negated_success_words_still_describe_a_decline(string reply) =>
         Assert.Null(ReplyCheck.FindProblem(reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$10.00"));
 
@@ -169,9 +169,33 @@ public class ReplyCheckTests
 
     [Theory]
     [InlineData("No money was moved, because chequing doesn't have enough to withdraw $25.00.")]
-    [InlineData("I couldn't withdraw $25.00 from chequing. Your balance there is still $0.00.")]
+    [InlineData("I couldn't withdraw $25.00 from chequing because there isn't enough money. Your balance there is still $0.00.")]
     public void Plainly_worded_declines_still_pass(string reply) =>
         Assert.Null(ReplyCheck.FindProblem(reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00"));
+
+    #endregion
+
+    #region Cases from the third review
+
+    [Theory]
+    [InlineData("I withdrew $4.00.", "it described a different kind of transaction")]
+    [InlineData("Your deposit of $4.00 into chequing went through.", "it described a different kind of transaction")]
+    [InlineData("I moved six dollars from savings to chequing.", "it wrote an amount in words instead of as a figure")]
+    [InlineData("Your savings and chequing balances are $4.00 and $6.00, respectively.", "it gave a wrong amount or balance")]
+    public void Different_wording_that_misstates_a_transfer_is_caught(string reply, string expected) =>
+        Assert.Equal(expected, ReplyCheck.FindProblem(reply, Transfer, TransferResult));
+
+    [Fact]
+    public void A_correct_respectively_reply_passes() =>
+        Assert.Null(ReplyCheck.FindProblem(
+            "Done! Your savings and chequing balances are now $6.00 and $4.00, respectively.", Transfer, TransferResult));
+
+    [Theory]
+    [InlineData("Your withdrawal of $25.00 was declined because your account is frozen.")]
+    [InlineData("I couldn't withdraw $25.00 from chequing.")]
+    public void A_decline_without_the_real_reason_is_caught(string reply) =>
+        Assert.Equal("it gave a different reason for the decline", ReplyCheck.FindProblem(
+            reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00"));
 
     #endregion
 
