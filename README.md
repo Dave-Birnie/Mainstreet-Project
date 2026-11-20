@@ -106,7 +106,11 @@ I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, starting each in a fresh se
 ## How I worked
 
 - **Tools:** Claude Code (Anthropic) wrote the code, tests and README, and ran the checks against the real APIs. ChatGPT reviewed the work against the brief.
-- **Workflow:** I turned the email into a requirements plan, directed the work, and tested it myself. My own testing found that a huge amount gave the wrong error, and that "1k" wasn't understood. Both were fixed.
+- **Workflow:**
+  1. **I planned the work.** I spent about 45 minutes turning the email into a written requirements plan.
+  2. **Claude Code built it from that plan.**
+  3. **I spent about 2 hours testing and reviewing the code.** My testing found that a huge amount gave the wrong error, and that "1k" wasn't understood. Both were fixed.
+- **A suggestion I accepted:** I considered adding transaction history and a confirmation step for large transfers. Claude Code advised against it, because neither is in the brief, history would need changes to the simulator, and confirmation would add a banking rule Mainstreet hadn't asked for. I agreed and kept the scope to the assignment.
 - **A suggestion I rejected:** for a transfer naming only one account ("Move $4 to chequing"), Claude Code's version filled in the other account. I rejected that because the brief says to ask for missing details. To verify, I re-ran the request (it now asks which account to use), and unit tests lock that behaviour in.
 - **Reviews acted on:** three reviews fed the app deliberately wrong model output through a test server. They found replies the checker let through (a wrong balance, a reversed direction, "I withdrew" after a transfer, an invented reason for a decline) and requests where the model could pick an amount or account. Each case is now a regression test. Re-running every check on both real models produced no false alarms.
 
