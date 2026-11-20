@@ -60,17 +60,17 @@ static AiConnection ConnectToAi(bool interactive)
 
     if (!AiSettings.HasApiKey(getVariable))
     {
-        string? enteredKey = interactive ? ApiKeyPrompt.Ask() : null;
-        if (enteredKey is null)
+        EnteredKey? entered = interactive ? ApiKeyPrompt.Ask() : null;
+        if (entered is null)
         {
             return AiConnection.Off(
                 "No API key is set.",
                 $"Restart the app and enter a key when asked, or set {AiSettings.ApiKeyVariable} before starting it.");
         }
 
-        // Use the typed key for this session only. It isn't saved anywhere.
-        getVariable = name => name == AiSettings.ApiKeyVariable ? enteredKey : Environment.GetEnvironmentVariable(name);
-        keySource = "entered at startup (not saved)";
+        // Use the typed key, with the chosen provider's endpoint and model, for this session only.
+        getVariable = ApiKeyPrompt.SettingsWith(entered, getVariable);
+        keySource = $"entered at startup for {entered.Provider.Name} (not saved)";
     }
 
     if (!AiSettings.TryLoad(getVariable, out AiSettings? settings, out string problem))

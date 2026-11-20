@@ -63,6 +63,52 @@ public class ReplyCheckTests
     public void Real_replies_pass(string command, string simulatorResult, string reply) =>
         Assert.Null(ReplyCheck.FindProblem(reply, command, simulatorResult));
 
+    // Every reply gemini-3.8-flash wrote during manual testing.
+    public static TheoryData<string, string, string> RealGeminiReplies => new TheoryData<string, string, string>
+    {
+        { "balance", "chequing=$4.00 | savings=$46.00",
+            "You have $4.00 in your chequing account and $46.00 in your savings account." },
+        { "balance savings", "savings=$46.00",
+            "Your savings account balance is $46.00." },
+        { "deposit savings 1000.00", "DEPOSIT $1000.00 TO savings | savings=$1046.00",
+            "I've deposited $1000.00 into your savings account. Your savings balance is now $1046.00." },
+        { "deposit savings 50.00", "DEPOSIT $50.00 TO savings | savings=$1096.00",
+            "I have deposited $50.00 into your savings account. Your new savings balance is $1096.00." },
+        { "deposit savings 50.00", "DEPOSIT $50.00 TO savings | savings=$50.00",
+            "I have deposited $50.00 into your savings account. Your new savings balance is $50.00." },
+        { "transfer savings chequing 3.00", "TRANSFER $3.00 FROM savings TO chequing | savings=$7.00 | chequing=$3.00",
+            "I have transferred $3.00 from your savings to your chequing account. Your new savings balance is $7.00 and your chequing balance is $3.00." },
+        { "transfer savings chequing 4.00", "TRANSFER $4.00 FROM savings TO chequing | savings=$46.00 | chequing=$4.00",
+            "I have transferred $4.00 from your savings account to your chequing account. Your savings balance is now $46.00, and your chequing balance is $4.00." },
+        { "transfer savings chequing 4.00", "TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00",
+            "I have transferred $4.00 from your savings to your chequing account. Your savings balance is now $6.00 and your chequing balance is $4.00." },
+        { "transfer savings savings 5.00", "ERROR SAME_ACCOUNT",
+            "The transfer of $5.00 was declined and no balance changed because a transfer must be between two different accounts." },
+        { "withdraw chequing 20.00", "ERROR INSUFFICIENT_FUNDS | chequing=$4.00",
+            "Your request to withdraw $20.00 was declined because your chequing account does not have enough funds, and no balance has changed. Your current chequing balance is $4.00." },
+        { "withdraw chequing 20.00", "ERROR INSUFFICIENT_FUNDS | chequing=$4.00",
+            "Your withdrawal of $20.00 could not be completed because your chequing account does not have enough funds, and no balance has changed. Your current chequing balance is $4.00." },
+        { "withdraw chequing 20.00", "ERROR INSUFFICIENT_FUNDS | chequing=$4.00",
+            "Your withdrawal of $20.00 could not be completed because your chequing account does not have enough funds, so no balance has changed. Your chequing account balance remains $4.00." },
+        { "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00",
+            "Your withdrawal of $25.00 was declined because your chequing account does not have enough funds, leaving your balance unchanged at $0.00." },
+        { "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$10.00",
+            "We could not complete your withdrawal of $25.00 because your chequing account does not have enough funds. No balance has changed, and your chequing balance remains $10.00." },
+    };
+
+    [Theory]
+    [MemberData(nameof(RealGeminiReplies))]
+    public void Real_gemini_replies_pass(string command, string simulatorResult, string reply) =>
+        Assert.Null(ReplyCheck.FindProblem(reply, command, simulatorResult));
+
+    // "could not be completed" contains a success word, but it describes a decline.
+    [Theory]
+    [InlineData("Your withdrawal of $25.00 could not be completed because chequing doesn't have enough money.")]
+    [InlineData("Your withdrawal of $25.00 was not successful, because chequing only has $10.00.")]
+    [InlineData("The withdrawal of $25.00 wasn't completed. Your chequing balance is still $10.00.")]
+    public void Negated_success_words_still_describe_a_decline(string reply) =>
+        Assert.Null(ReplyCheck.FindProblem(reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$10.00"));
+
     #endregion
 
     #region Replies that misstate the result are caught

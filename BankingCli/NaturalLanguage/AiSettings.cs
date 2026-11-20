@@ -23,8 +23,9 @@ internal sealed record AiSettings(Uri ChatCompletionsUri, string Model, string A
     public const string ModelVariable = "BANKING_AI_MODEL";
     public const string TimeoutVariable = "BANKING_AI_TIMEOUT_SECONDS";
 
-    public const string DefaultEndpoint = "https://api.openai.com/v1";
-    public const string DefaultModel = "gpt-4o-mini";
+    // Without other settings, the app uses OpenAI.
+    public static readonly string DefaultEndpoint = AiProvider.OpenAi.Endpoint;
+    public static readonly string DefaultModel = AiProvider.OpenAi.DefaultModel;
     public const int DefaultTimeoutSeconds = 30;
 
     #endregion

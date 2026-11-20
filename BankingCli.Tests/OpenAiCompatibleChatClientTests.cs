@@ -141,6 +141,18 @@ public class OpenAiCompatibleChatClientTests
         Assert.Equal($"HTTP {(int)status}: provider says no", error.Details);
     }
 
+    // Gemini sends its errors as a list. This is the shape of a real response seen during testing.
+    [Fact]
+    public async Task Gemini_style_errors_still_show_the_provider_s_message()
+    {
+        StubHttpHandler handler = StubHttpHandler.Json(HttpStatusCode.NotFound,
+            """[{"error":{"code":404,"message":"This model models/gemini-2.5-flash is no longer available to new users.","status":"NOT_FOUND"}}]""");
+
+        AiServiceException error = await Assert.ThrowsAsync<AiServiceException>(() => Send(handler));
+
+        Assert.Equal("HTTP 404: This model models/gemini-2.5-flash is no longer available to new users.", error.Details);
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("")]

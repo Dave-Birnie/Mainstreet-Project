@@ -8,7 +8,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```sh
 dotnet build                      # build
-dotnet test                       # run the 208 automated tests (no API key needed)
+dotnet test                       # run the 229 automated tests (no API key needed)
 dotnet run --project BankingCli   # start the app
 ```
 
@@ -46,10 +46,18 @@ dotnet run --project BankingCli
 
 To confirm the settings, type `status` in the app. It shows the endpoint and model in use, and whether the last AI request worked.
 
-**No key set?** The app asks at startup whether you'd like to enter one. The key is hidden as you type and isn't saved. Answer `n` and the original commands still work.
+**Using Google Gemini instead.** Set the endpoint and model to Gemini's, and use a Gemini API key:
+
+```powershell
+$env:BANKING_AI_API_KEY  = "your-gemini-key"
+$env:BANKING_AI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai"
+$env:BANKING_AI_MODEL    = "gemini-3.8-flash"
+```
+
+**No key set?** The app asks at startup whether you'd like to enter a Gemini or ChatGPT key. You choose the provider, so the right endpoint and model are set for you. The key is hidden as you type and isn't saved. Answer `n` and the original commands still work.
 
 **Other notes:**
-- The endpoint can be any OpenAI-compatible API whose model supports JSON mode.
+- Any other OpenAI-compatible API can be used by setting all three variables, as long as its model supports JSON mode.
 - `OPENAI_API_KEY` also works for the key.
 - `BANKING_AI_TIMEOUT_SECONDS` sets the time limit for each API call. The default is 30.
 - No key is stored in this repo.
@@ -80,7 +88,7 @@ How much money do I have in both accounts?
 
 ## 4. Three checks
 
-I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`. Each check started a fresh session, so both balances began at $0.00. I started the app with `dotnet run --project BankingCli -- --show-commands`. The `--show-commands` flag prints the simulator command each English request turned into, so I could confirm exactly what ran.
+I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, and repeated them with Google Gemini `gemini-3.8-flash`, which gave the same results. Each check started a fresh session, so both balances began at $0.00. I started the app with `dotnet run --project BankingCli -- --show-commands`. The `--show-commands` flag prints the simulator command each English request turned into, so I could confirm exactly what ran.
 
 The AI's wording changes from run to run. The amounts and balances don't, because they come from the simulator.
 
@@ -94,7 +102,7 @@ The AI's wording changes from run to run. The amounts and balances don't, becaus
 **Observed results**
 1. `DEPOSIT $10.00 TO savings | savings=$10.00`
 2. The app ran one simulator command, `transfer savings chequing 4.00`, and replied:
-   *"The transfer of $4.00 from your savings account to your chequing account was successful, leaving you with a balance of $6.00 in savings and $4.00 in chequing."*
+   *"The transfer of $4.00 from your savings account to your chequing account was successful! Your savings balance is now $6.00, and your chequing balance is $4.00."*
 3. `chequing=$4.00 | savings=$6.00`, which matches the reply.
 
 ### Check 2: Request that needs clarification
@@ -111,7 +119,7 @@ The AI's wording changes from run to run. The amounts and balances don't, becaus
    *"I need a bit more information to make that transfer: the amount. Please include it when you try again, for example "Move $20 from savings to chequing". Nothing has been changed."*
 3. `chequing=$0.00 | savings=$10.00`, so nothing changed.
 4. The app ran `transfer savings chequing 3.00` and replied:
-   *"Your transfer of $3.00 from savings to chequing was successful. Your new savings balance is $7.00, and your chequing balance is $3.00."*
+   *"The transfer of $3.00 from your savings account to your chequing account has succeeded, leaving your savings balance at $7.00 and your chequing balance at $3.00."*
 
 ### Check 3: Failure case (not enough money)
 
@@ -123,14 +131,15 @@ The AI's wording changes from run to run. The amounts and balances don't, becaus
 **Observed results**
 1. `DEPOSIT $10.00 TO chequing | chequing=$10.00`
 2. The app ran `withdraw chequing 25.00`. The simulator declined it with `ERROR INSUFFICIENT_FUNDS | chequing=$10.00`, and the app replied:
-   *"Your withdrawal of $25 from your chequing account was declined because there are insufficient funds; your current balance is $10.00."*
+   *"Your request to withdraw $25 from your chequing account was declined because there are insufficient funds; you currently have $10.00 in your chequing account."*
 3. `chequing=$10.00 | savings=$0.00`, so nothing changed.
 
 ### Other checks
 - **AI service down before anything ran.** With the endpoint pointed at a closed port, nothing ran. The app explained the problem and how to fix it, and the original commands kept working.
 - **AI service down after a command ran.** A test server returned an error for the reply. The app showed the simulator's own result, and the command ran exactly once.
 - **Original commands.** With piped input, a script of original commands produced output byte-for-byte identical to the starter app's.
-- **Automated tests.** `dotnet test` runs 208 tests against the real simulator, with a fake standing in for the API. They cover every operation, clarifications, invalid amounts, API failures, and the checks on the AI's replies.
+- **Google Gemini.** All three checks and the extra cases also passed with `gemini-3.8-flash`, set up through the startup prompt. Setting it up through environment variables was checked with a deposit request. For example, for check 1 it replied: *"I have transferred $4.00 from your savings to your chequing account. Your new savings balance is $6.00 and your chequing balance is $4.00."*
+- **Automated tests.** `dotnet test` runs 229 tests against the real simulator, with a fake standing in for the API. They cover every operation, clarifications, invalid amounts, API failures, and the checks on the AI's replies.
 
 ## How it works
 

@@ -172,8 +172,15 @@ internal sealed class OpenAiCompatibleChatClient(HttpClient httpClient, AiSettin
         string? message;
         try
         {
-            // Usually { "error": { "message": "..." } }, but some providers send { "error": "..." }.
-            message = JsonNode.Parse(responseText) is JsonObject response
+            // Usually { "error": { "message": "..." } }. Some providers send { "error": "..." },
+            // and Gemini wraps the whole thing in a list: [ { "error": { ... } } ].
+            JsonNode? parsed = JsonNode.Parse(responseText);
+            if (parsed is JsonArray { Count: > 0 } list)
+            {
+                parsed = list[0];
+            }
+
+            message = parsed is JsonObject response
                 ? response["error"] switch
                 {
                     JsonObject error => error["message"]?.ToString(),

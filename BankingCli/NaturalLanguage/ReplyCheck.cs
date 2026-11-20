@@ -162,7 +162,10 @@ internal static partial class ReplyCheck
         }
 
         bool soundsDeclined = DeclineWords().IsMatch(reply);
-        bool soundsSuccessful = SuccessWords().IsMatch(reply);
+
+        // "could not be completed" and "was not successful" describe a decline, not a success,
+        // so negated success words are removed before looking for a success claim.
+        bool soundsSuccessful = SuccessWords().IsMatch(NegatedSuccess().Replace(reply, string.Empty));
 
         return facts.WasDeclined
             ? soundsDeclined && !soundsSuccessful
@@ -175,6 +178,10 @@ internal static partial class ReplyCheck
 
     [GeneratedRegex(@"\b(?:success|successful|successfully|completed|went through|all set)\b", RegexOptions.IgnoreCase)]
     private static partial Regex SuccessWords();
+
+    // "not", "never" or "n't", up to two more words, then a success word: "could not be completed".
+    [GeneratedRegex(@"(?:\bnot\b|\bnever\b|n['’]t\b)(?:\s+\w+){0,2}?\s+(?:success|successful|successfully|completed|went through|all set)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NegatedSuccess();
 
     #endregion
 
