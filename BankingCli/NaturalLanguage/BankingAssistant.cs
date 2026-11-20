@@ -87,7 +87,19 @@ internal sealed class BankingAssistant
         }
 
         // Step 2: check it locally. If anything is missing or invalid, explain why and run nothing.
-        IntentDecision decision = IntentValidator.Validate(intent, input);
+        IntentDecision decision;
+        try
+        {
+            decision = IntentValidator.Validate(intent, input);
+        }
+        catch (Exception ex)
+        {
+            // A safety net: nothing has run yet, so report the problem rather than stopping the app.
+            return new CommandResult(
+                $"Sorry, something went wrong while checking that request ({ex.Message}). Nothing has been changed. " +
+                "Please try rewording it, or use a command such as \"transfer savings chequing 4\" (type help for the list).");
+        }
+
         if (decision.Command is null)
         {
             return new CommandResult(decision.Message);

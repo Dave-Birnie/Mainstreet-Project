@@ -33,6 +33,20 @@ internal static partial class IntentValidator
     private const string TooLargeMessage =
         "That amount is larger than the simulator can handle. Please try a smaller amount. " + NothingChanged;
 
+    /// <summary>"Your request mentions more than one amount ($5.00 and $10.00)…"</summary>
+    private static string WhichAmountMessage(string request)
+    {
+        List<string> amounts = StatedAmounts.AmountsIn(request)
+            .Select(amount => "$" + amount.ToString("0.00", CultureInfo.InvariantCulture))
+            .ToList();
+        string list = amounts.Count <= 2
+            ? string.Join(" and ", amounts)
+            : $"{string.Join(", ", amounts[..^1])}, and {amounts[^1]}";
+
+        return $"Your request mentions more than one amount ({list}). Please send it again with just the amount " +
+               $"you want to use. {NothingChanged}";
+    }
+
     private const string WhichBalanceMessage =
         "Which balance would you like to see: chequing, savings, or both? Please include it when you try again.";
 
@@ -99,7 +113,7 @@ internal static partial class IntentValidator
             return AskFor(action, missing, example);
         }
 
-        return RunOrExplain(amountCheck, $"{command} {account} {amount}");
+        return RunOrExplain(amountCheck, $"{command} {account} {amount}", request);
     }
 
     /// <summary>
@@ -134,7 +148,7 @@ internal static partial class IntentValidator
         }
 
         // "Savings to savings" is passed through, so the simulator applies its own SAME_ACCOUNT rule.
-        return RunOrExplain(amountCheck, $"transfer {from} {to} {amount}");
+        return RunOrExplain(amountCheck, $"transfer {from} {to} {amount}", request);
     }
 
     /// <summary>
@@ -165,16 +179,18 @@ internal static partial class IntentValidator
 
     private enum AmountCheck
     {
-        Missing,  // Not given, or the customer never wrote that number.
-        Invalid,  // Not a positive amount with at most two decimal places.
-        TooLarge, // A proper amount, but too many digits to work with.
+        Missing,   // Not given, or the customer never wrote that number.
+        Ambiguous, // The customer wrote more than one amount, such as "$5 or $10".
+        Invalid,   // Not a positive amount with at most two decimal places.
+        TooLarge,  // A proper amount, but too many digits to work with.
         Valid
     }
 
     /// <summary>Runs the command when the amount is valid, or explains what's wrong with the amount.</summary>
-    private static IntentDecision RunOrExplain(AmountCheck amountCheck, string command) => amountCheck switch
+    private static IntentDecision RunOrExplain(AmountCheck amountCheck, string command, string request) => amountCheck switch
     {
         AmountCheck.Valid => IntentDecision.Run(command),
+        AmountCheck.Ambiguous => IntentDecision.Decline(DecisionKind.MissingDetails, WhichAmountMessage(request)),
         AmountCheck.TooLarge => IntentDecision.Decline(DecisionKind.InvalidAmount, TooLargeMessage),
         _ => IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage)
     };
@@ -211,9 +227,16 @@ internal static partial class IntentValidator
         }
 
         // A number the customer never wrote was made up by the model, so ask for the amount instead.
-        if (!StatedAmounts.IsStatedIn(request, amount))
+        IReadOnlyList<decimal> writtenAmounts = StatedAmounts.AmountsIn(request);
+        if (!writtenAmounts.Contains(amount))
         {
             return AmountCheck.Missing;
+        }
+
+        // With more than one amount in the request ("$5 or $10"), don't let the model pick: ask.
+        if (writtenAmounts.Count > 1)
+        {
+            return AmountCheck.Ambiguous;
         }
 
         // Decimal places are counted in the text, because reading a very long number can round it.

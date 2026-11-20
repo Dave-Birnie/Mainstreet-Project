@@ -128,11 +128,11 @@ public class ReplyCheckTests
     [InlineData("I moved $4.00. You now have $4.00 in savings and $6.00 in chequing.")]
     [InlineData("Done. Your chequing balance is $6.00 and your savings balance is $4.00.")]
     public void Balances_on_the_wrong_account_are_caught(string reply) =>
-        Assert.Equal("it gave a balance for the wrong account", ReplyCheck.FindProblem(reply, Transfer, TransferResult));
+        Assert.Equal("it gave a wrong amount or balance", ReplyCheck.FindProblem(reply, Transfer, TransferResult));
 
     [Fact]
     public void The_requested_amount_only_counts_on_an_account_the_command_used() =>
-        Assert.Equal("it gave a balance for the wrong account", ReplyCheck.FindProblem(
+        Assert.Equal("it gave a wrong amount or balance", ReplyCheck.FindProblem(
             "Done! Your chequing balance is now $10.00.",
             "deposit savings 10.00",
             "DEPOSIT $10.00 TO savings | savings=$10.00"));
@@ -144,6 +144,38 @@ public class ReplyCheckTests
     public void Success_claimed_for_a_declined_request_is_caught(string reply) =>
         Assert.Equal("it didn't say the request was declined", ReplyCheck.FindProblem(
             reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$10.00"));
+
+    #endregion
+
+    #region Cases from the second review (all were accepted before)
+
+    // After depositing $10 into savings and moving $4 to chequing: savings $6.00, chequing $4.00.
+    [Theory]
+    [InlineData("Your savings balance is now $4.00.", "it gave a wrong amount or balance")]
+    [InlineData("I moved $6.00 from savings to chequing.", "it gave a wrong amount or balance")]
+    [InlineData("I moved $4.00 from chequing to savings.", "it named the wrong account")]
+    [InlineData("I moved $4.00 to savings.", "it named the wrong account")]
+    [InlineData("Your chequing balance is $6.00.", "it gave a wrong amount or balance")]
+    public void Wrong_balances_amounts_and_directions_are_caught(string reply, string expected) =>
+        Assert.Equal(expected, ReplyCheck.FindProblem(reply, Transfer, TransferResult));
+
+    [Theory]
+    [InlineData("I withdrew $25.00 from chequing. You do not need to do anything else.")]
+    [InlineData("Done! You do not need to do anything else.")]
+    [InlineData("Your $25.00 withdrawal from chequing has been processed.")]
+    public void A_declined_request_described_as_done_is_caught(string reply) =>
+        Assert.Equal("it didn't say the request was declined", ReplyCheck.FindProblem(
+            reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00"));
+
+    [Theory]
+    [InlineData("No money was moved, because chequing doesn't have enough to withdraw $25.00.")]
+    [InlineData("I couldn't withdraw $25.00 from chequing. Your balance there is still $0.00.")]
+    public void Plainly_worded_declines_still_pass(string reply) =>
+        Assert.Null(ReplyCheck.FindProblem(reply, "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00"));
+
+    #endregion
+
+    #region Other outcome checks
 
     [Fact]
     public void A_decline_claimed_for_a_successful_request_is_caught() =>

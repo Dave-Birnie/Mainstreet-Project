@@ -234,6 +234,42 @@ public class IntentValidatorTests
 
     #endregion
 
+    #region Cases from the second review
+
+    // The model picked $5, but the customer wrote two amounts, so the app asks instead.
+    [Fact]
+    public void Two_amounts_in_one_request_are_asked_about()
+    {
+        IntentDecision decision = Validate("deposit", "savings", amount: "5", request: "Deposit $5 or $10 into savings");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+        Assert.Equal("Your request mentions more than one amount ($5.00 and $10.00). Please send it again with just " +
+                     "the amount you want to use. Nothing has been changed.", decision.Message);
+    }
+
+    [Theory]
+    [InlineData("Deposit twelve dollars and fifty cents into savings", "12.50", "deposit savings 12.50")]
+    [InlineData("Deposit four point five dollars into savings", "4.5", "deposit savings 4.50")]
+    public void Dollars_and_cents_and_decimals_in_words_are_accepted(string request, string modelAmount, string expected) =>
+        Assert.Equal(expected, Validate("deposit", "savings", amount: modelAmount, request: request).Command);
+
+    [Fact]
+    public void Nonsense_number_words_do_not_crash_the_check()
+    {
+        string request = "Deposit $1 into savings. one " + string.Join(' ', Enumerable.Repeat("hundred", 15));
+
+        IntentDecision decision = Validate("deposit", "savings", amount: "1", request: request);
+
+        Assert.Equal("deposit savings 1.00", decision.Command);
+    }
+
+    [Fact]
+    public void Three_decimal_places_are_rejected_like_the_original_command() =>
+        Assert.Equal(DecisionKind.InvalidAmount,
+            Validate("deposit", "savings", amount: "1.230", request: "Put $1.230 into savings").Kind);
+
+    #endregion
+
     #region Requests the app can't handle are refused
 
     [Fact]

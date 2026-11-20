@@ -8,25 +8,21 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```sh
 dotnet build                      # build
-dotnet test                       # run the 229 automated tests (no API key needed)
-dotnet run --project BankingCli   # start the app
+dotnet test                       # run the 254 automated tests (no API key needed)
+dotnet run --project BankingCli   # start the app; type exit to quit
 ```
-
-Then type a command or a request at the `bank>` prompt, and type `exit` to quit.
 
 If Visual Studio reports `NETSDK1004`, run `dotnet restore` once. It also helps to keep the project outside OneDrive.
 
 ## 2. Configure the API endpoint, model, and key
 
-The app reads its settings from environment variables. **Only the key is required.**
+Settings come from environment variables. **Only the key is required.**
 
-| Setting | Environment variable | Default if not set |
+| Setting | Environment variable | Default |
 | --- | --- | --- |
 | API key | `BANKING_AI_API_KEY` | none |
 | API endpoint | `BANKING_AI_ENDPOINT` | `https://api.openai.com/v1` |
 | Model | `BANKING_AI_MODEL` | `gpt-4o-mini` |
-
-Set them in the same terminal you run the app from.
 
 **Windows (PowerShell)**
 ```powershell
@@ -36,135 +32,85 @@ $env:BANKING_AI_MODEL    = "gpt-4o-mini"                 # optional
 dotnet run --project BankingCli
 ```
 
-**macOS / Linux**
-```sh
-export BANKING_AI_API_KEY="sk-your-key"
-export BANKING_AI_ENDPOINT="https://api.openai.com/v1"   # optional
-export BANKING_AI_MODEL="gpt-4o-mini"                    # optional
-dotnet run --project BankingCli
-```
+**macOS / Linux:** the same, using `export BANKING_AI_API_KEY="sk-your-key"` and so on.
 
-To confirm the settings, type `status` in the app. It shows the endpoint and model in use, and whether the last AI request worked.
+**Google Gemini:** set the endpoint to `https://generativelanguage.googleapis.com/v1beta/openai`, the model to `gemini-3.8-flash`, and the key to a Gemini API key.
 
-**Using Google Gemini instead.** Set the endpoint and model to Gemini's, and use a Gemini API key:
+**Other OpenAI-compatible APIs:** set all three variables. The model must support JSON mode.
 
-```powershell
-$env:BANKING_AI_API_KEY  = "your-gemini-key"
-$env:BANKING_AI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai"
-$env:BANKING_AI_MODEL    = "gemini-3.8-flash"
-```
+**No key set?** The app asks at startup whether you'd like to enter a Gemini or ChatGPT key, and sets the matching endpoint and model. The key is hidden as you type and isn't saved. Answer `n` and the original commands still work.
 
-**No key set?** The app asks at startup whether you'd like to enter a Gemini or ChatGPT key. You choose the provider, so the right endpoint and model are set for you. The key is hidden as you type and isn't saved. Answer `n` and the original commands still work.
-
-**Other notes:**
-- Any other OpenAI-compatible API can be used by setting all three variables, as long as its model supports JSON mode.
-- `OPENAI_API_KEY` also works for the key.
-- `BANKING_AI_TIMEOUT_SECONDS` sets the time limit for each API call. The default is 30.
-- No key is stored in this repo.
+Type `status` in the app to see the endpoint and model in use, and whether the last AI request worked. No key is stored in this repo.
 
 ## 3. Example inputs
 
-**Original commands.** These work exactly as before and never call the API.
 ```text
-deposit savings 10
-withdraw chequing 1
+deposit savings 10                           (original commands work exactly as before)
 transfer savings chequing 4
 balance
-balance savings
-help
-exit
-```
-
-**Everyday English**
-```text
-Put fifty dollars into savings
-Withdraw $25 from chequing
-Move four dollars from savings to chequing
+Put fifty dollars into savings               (everyday English)
 transfer 1k from checking to savings
 How much money do I have in both accounts?
+status                                       (new: shows the AI connection)
 ```
-
-**New command:** `status` shows whether everyday-English requests are on, and how the last AI request went.
 
 ## 4. Three checks
 
-I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, and repeated them with Google Gemini `gemini-3.8-flash`, which gave the same results. Each check started a fresh session, so both balances began at $0.00. I started the app with `dotnet run --project BankingCli -- --show-commands`. The `--show-commands` flag prints the simulator command each English request turned into, so I could confirm exactly what ran.
-
-The AI's wording changes from run to run. The amounts and balances don't, because they come from the simulator.
+I ran these on 2026-11-20 with OpenAI `gpt-4o-mini`, starting each in a fresh session with both balances at $0.00. I repeated them with Google Gemini `gemini-3.8-flash`, which gave the same commands and balances. I started the app with `dotnet run --project BankingCli -- --show-commands`, which prints the simulator command behind each English request. The AI's wording varies from run to run. The amounts and balances come from the simulator, so they don't.
 
 ### Check 1: Successful transfer
 
-**Steps**
-1. Type `deposit savings 10`.
-2. Type `Move four dollars from savings to chequing`.
-3. Type `balance`.
+**Steps:** type `deposit savings 10`, then `Move four dollars from savings to chequing`, then `balance`.
 
-**Observed results**
+**Observed:**
 1. `DEPOSIT $10.00 TO savings | savings=$10.00`
-2. The app ran one simulator command, `transfer savings chequing 4.00`, and replied:
-   *"The transfer of $4.00 from your savings account to your chequing account was successful! Your savings balance is now $6.00, and your chequing balance is $4.00."*
+2. One command ran, `transfer savings chequing 4.00`. The reply: *"The transfer of $4.00 from your savings account to your chequing account was successful! Your savings balance is now $6.00, and your chequing balance is $4.00."*
 3. `chequing=$4.00 | savings=$6.00`, which matches the reply.
 
 ### Check 2: Request that needs clarification
 
-**Steps**
-1. Type `deposit savings 10`.
-2. Type `Move some money from savings to chequing` (no amount).
-3. Type `balance`.
-4. Type `Move $3 from savings to chequing` (the complete request).
+**Steps:** type `deposit savings 10`, then `Move some money from savings to chequing` (no amount), then `balance`, then `Move $3 from savings to chequing`.
 
-**Observed results**
+**Observed:**
 1. `DEPOSIT $10.00 TO savings | savings=$10.00`
-2. No command ran. The app replied:
-   *"I need a bit more information to make that transfer: the amount. Please include it when you try again, for example "Move $20 from savings to chequing". Nothing has been changed."*
+2. No command ran. The reply: *"I need a bit more information to make that transfer: the amount. Please include it when you try again, for example "Move $20 from savings to chequing". Nothing has been changed."*
 3. `chequing=$0.00 | savings=$10.00`, so nothing changed.
-4. The app ran `transfer savings chequing 3.00` and replied:
-   *"The transfer of $3.00 from your savings account to your chequing account has succeeded, leaving your savings balance at $7.00 and your chequing balance at $3.00."*
+4. `transfer savings chequing 3.00` ran. The reply: *"The transfer of $3.00 from your savings account to your chequing account was successful, leaving you with a balance of $7.00 in savings and $3.00 in chequing."*
 
 ### Check 3: Failure case (not enough money)
 
-**Steps**
-1. Type `deposit chequing 10`.
-2. Type `Withdraw $25 from chequing`.
-3. Type `balance`.
+**Steps:** type `deposit chequing 10`, then `Withdraw $25 from chequing`, then `balance`.
 
-**Observed results**
+**Observed:**
 1. `DEPOSIT $10.00 TO chequing | chequing=$10.00`
-2. The app ran `withdraw chequing 25.00`. The simulator declined it with `ERROR INSUFFICIENT_FUNDS | chequing=$10.00`, and the app replied:
-   *"Your request to withdraw $25 from your chequing account was declined because there are insufficient funds; you currently have $10.00 in your chequing account."*
+2. `withdraw chequing 25.00` ran and the simulator declined it with `ERROR INSUFFICIENT_FUNDS | chequing=$10.00`. The reply: *"Your request to withdraw $25 from your chequing account was declined because there are insufficient funds; the current balance is $10.00."*
 3. `chequing=$10.00 | savings=$0.00`, so nothing changed.
 
 ### Other checks
-- **AI service down before anything ran.** With the endpoint pointed at a closed port, nothing ran. The app explained the problem and how to fix it, and the original commands kept working.
-- **AI service down after a command ran.** A test server returned an error for the reply. The app showed the simulator's own result, and the command ran exactly once.
-- **Original commands.** With piped input, a script of original commands produced output byte-for-byte identical to the starter app's.
-- **Google Gemini.** All three checks and the extra cases also passed with `gemini-3.8-flash`, set up through the startup prompt. Setting it up through environment variables was checked with a deposit request. For example, for check 1 it replied: *"I have transferred $4.00 from your savings to your chequing account. Your new savings balance is $6.00 and your chequing balance is $4.00."*
-- **Automated tests.** `dotnet test` runs 229 tests against the real simulator, with a fake standing in for the API. They cover every operation, clarifications, invalid amounts, API failures, and the checks on the AI's replies.
+- **API failures:** with the endpoint pointed at a closed port, nothing ran and the app explained how to fix it. When a test server failed only the reply, the app showed the simulator's own result, and the command ran exactly once.
+- **Original commands:** with piped input, a script of original commands produced output identical to the starter app's.
+- **Automated tests:** 254 tests run against the real simulator, with a fake standing in for the API. They include every reply the two models wrote during testing (all accepted), and misleading replies that must be rejected.
 
 ## How it works
 
-- **Original commands** and `status` go straight to the simulator, with no API call.
-- **English requests:**
-  1. The API turns the request into structured JSON.
-  2. The app checks it locally:
-     - accounts and amounts only count if you actually typed them
-     - missing details are asked for, never guessed
-  3. The app runs **one** simulator command, built from those checked values.
-  4. The API writes the reply from the simulator's real result.
-  5. Before the reply is shown, the app checks that its amounts, accounts and outcome match the simulator. If the reply fails that check, or the API fails, the app shows the simulator's own result instead, and the command never runs twice.
+1. Original commands and `status` go straight to the simulator, with no API call.
+2. For English requests, the API returns structured JSON. The app then checks it locally:
+   - Accounts and amounts must appear in what you typed.
+   - Missing details are asked for.
+   - A request with two different amounts ("$5 or $10") is asked about, not guessed.
+3. The app runs **one** simulator command, built from the checked values.
+4. The API writes the reply from the simulator's real result. Before it's shown, the app checks the reply's amounts, balances, accounts and outcome against that result. If the check fails, or the API fails, the app shows the simulator's own result instead. The command never runs twice.
 
 ## How I worked
 
-- **Tools:** Claude Code (Anthropic) wrote the code, tests and README, and ran the checks against the real API. ChatGPT reviewed the finished work against the brief.
-- **Workflow:**
-  - I turned the email into a requirements plan.
-  - Claude Code built the feature in steps, starting by committing the original starter unchanged.
-  - I directed the work and tested it myself. That found two bugs, which were then fixed and tested: a huge amount gave the wrong error message, and "1k" wasn't understood.
-- **A suggestion I rejected:** for a transfer that named only one account ("Move $4 to chequing"), Claude Code's version filled in the other account. I rejected that because the brief says to ask for missing details. To verify, I re-ran the request (it now asks which account to move the money from), and unit tests lock that behaviour in.
-- **Review findings acted on:** ChatGPT pointed out that a made-up amount could still run, and that a reply could misstate the outcome. Local checks now catch both. The reply check then caught the model calling a successful withdrawal "unsuccessful", which was fixed by telling the model the outcome explicitly.
+- **Tools:** Claude Code (Anthropic) wrote the code, tests and README, and ran the checks against the real APIs. ChatGPT reviewed the work against the brief.
+- **Workflow:** I turned the email into a requirements plan, directed the work, and tested it myself. My own testing found that a huge amount gave the wrong error, and that "1k" wasn't understood. Both were fixed.
+- **A suggestion I rejected:** for a transfer naming only one account ("Move $4 to chequing"), Claude Code's version filled in the other account. I rejected that because the brief says to ask for missing details. To verify, I re-ran the request (it now asks which account to use), and unit tests lock that behaviour in.
+- **Reviews acted on:** two reviews found replies that misstated the result, such as the wrong balance, the wrong direction, or a decline described as done. They also found amounts the model could choose or invent. Each case is now a regression test, and the reply checker reads each dollar amount in context. Re-running every check on both models produced no false alarms.
 
 ## Limitations
 
 - **One request at a time.** There's no conversation memory, so after a clarification you send the complete request again.
-- **Some wording gets a clarification question instead of a result:** typos in account names, and amounts like "twelve dollars and fifty cents". That's the safe way to be wrong.
+- **The checks confirm that an amount was typed, not that it was meant.** "My savings goal is $100. Deposit some money" relies on the model leaving the amount out. Both models did in testing, but that isn't guaranteed.
+- **The reply checks are word-based.** They catch wrong figures, balances on the wrong account, the wrong direction, and the wrong outcome, but free text can't be verified completely. When in doubt they reject the reply and show the simulator's own result.
 - **Beyond the brief:** the `status` command, the startup key prompt, plain-English error explanations, `--show-commands`, and the reply checks.
