@@ -106,7 +106,7 @@ internal sealed class BankingAssistant
         catch (Exception ex) when (!IsCancellation(ex, cancellationToken))
         {
             // Step 5: the command has already run. Show its real result and don't run it again.
-            return new CommandResult(ReplyFailedMessage(RecordAiFailure(ex), result.Output));
+            return new CommandResult(ReplyFailedMessage(RecordAiFailure(ex), decision.Command, result.Output));
         }
     }
 
@@ -130,7 +130,7 @@ internal sealed class BankingAssistant
             return WithExtraLine(result, ConsoleText.MoreHelp(connection));
         }
 
-        string? explanation = SimulatorErrors.Explain(result.Output);
+        string? explanation = SimulatorErrors.Explain(result.Output, input);
         return explanation is null ? result : WithExtraLine(result, explanation);
     }
 
@@ -144,7 +144,7 @@ internal sealed class BankingAssistant
         }
 
         // Explain the error, and that everyday English is off.
-        string? explanation = SimulatorErrors.Explain(result.Output);
+        string? explanation = SimulatorErrors.Explain(result.Output, input);
         string englishOff = "Everyday-English requests are off, so I can only follow the original commands. " +
                             "Type status to see how to turn everyday English on.";
         return WithExtraLine(result, explanation is null ? englishOff : explanation + NewLine + englishOff);
@@ -202,12 +202,12 @@ internal sealed class BankingAssistant
     /// The command already ran. Shows its real result, explained in plain English if it was declined.
     /// There's no "try again" here, because trying again would run the command twice.
     /// </summary>
-    private static string ReplyFailedMessage(AiServiceException problem, string simulatorResult)
+    private static string ReplyFailedMessage(AiServiceException problem, string command, string simulatorResult)
     {
         string message = $"I ran your request, but couldn't write a conversational reply: {problem.Problem}. " +
                          $"Here is the simulator's result:{NewLine}{simulatorResult}";
 
-        string? explanation = SimulatorErrors.Explain(simulatorResult);
+        string? explanation = SimulatorErrors.Explain(simulatorResult, command);
         return explanation is null ? message : message + NewLine + explanation;
     }
 

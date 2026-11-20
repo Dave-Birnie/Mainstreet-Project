@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace BankingCli.NaturalLanguage;
 
 /// <summary>
-/// Finds the numbers a customer actually wrote, in digits ("25", "$1,000") or words ("twenty-five", "a hundred").
+/// Finds the numbers a customer actually wrote, in digits ("25", "$1,000", "1k") or words ("twenty-five", "a hundred").
 /// Used to make sure an amount came from the customer and wasn't made up by the model.
 /// </summary>
 internal static partial class StatedAmounts
@@ -13,6 +13,13 @@ internal static partial class StatedAmounts
 
     /// <summary>True when the customer's text contains this amount. "$4" and "4.00" count as the same.</summary>
     public static bool IsStatedIn(string request, decimal amount) => NumbersIn(request).Contains(amount);
+
+    /// <summary>
+    /// True when the customer typed a number with too many digits to read, such as a 72-digit amount.
+    /// Models often miscopy long numbers, so this looks at what the customer typed, not at the model's copy.
+    /// </summary>
+    public static bool HasNumberTooLargeToRead(string request) =>
+        DigitsPattern().Matches(request).Any(match => !TryReadDigits(match.Groups["number"].Value, out _));
 
     /// <summary>Every number in the text, from digits and from number words.</summary>
     internal static List<decimal> NumbersIn(string request)
@@ -31,17 +38,35 @@ internal static partial class StatedAmounts
     {
         foreach (Match match in DigitsPattern().Matches(request))
         {
-            string digits = match.Value.Replace(",", string.Empty); // "1,000" means 1000.
-            if (decimal.TryParse(digits, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-                    CultureInfo.InvariantCulture, out decimal value))
+            if (!TryReadDigits(match.Groups["number"].Value, out decimal value))
             {
-                yield return value;
+                continue;
+            }
+
+            yield return value;
+
+            // "1k", "2.5k", "5 grand", "3 thousand", "2 million": also count the full amount.
+            decimal multiplier = match.Groups["scale"].Value.ToLowerInvariant() switch
+            {
+                "k" or "thousand" or "grand" => 1_000m,
+                "million" => 1_000_000m,
+                _ => 1m
+            };
+
+            if (multiplier != 1m && value <= decimal.MaxValue / multiplier)
+            {
+                yield return value * multiplier;
             }
         }
     }
 
-    // An optional minus sign, digits with optional thousands commas, and optional decimals.
-    [GeneratedRegex(@"-?\d[\d,]*(?:\.\d+)?")]
+    private static bool TryReadDigits(string digits, out decimal value) =>
+        decimal.TryParse(digits.Replace(",", string.Empty), // "1,000" means 1000.
+            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out value);
+
+    // An optional minus sign, digits with optional thousands commas and decimals, then an optional
+    // multiplier word such as "k" or "thousand". "1kg" isn't read as 1000.
+    [GeneratedRegex(@"(?<number>-?\d[\d,]*(?:\.\d+)?)(?:\s*(?<scale>k|thousand|grand|million)\b)?", RegexOptions.IgnoreCase)]
     private static partial Regex DigitsPattern();
 
     #endregion

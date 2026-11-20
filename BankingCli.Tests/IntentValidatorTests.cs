@@ -189,6 +189,49 @@ public class IntentValidatorTests
         Assert.Null(decision.Command);
     }
 
+    private const string HugeAmount = "100000000000000000000000000000000000000000000000000000000000000000000000";
+
+    [Fact]
+    public void A_huge_amount_is_explained_as_too_large()
+    {
+        IntentDecision decision = Validate(
+            "deposit", "savings", amount: HugeAmount, request: $"deposit {HugeAmount} to savings");
+
+        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
+        Assert.Equal("That amount is larger than the simulator can handle. Please try a smaller amount. " +
+                     "Nothing has been changed.", decision.Message);
+    }
+
+    // Seen with gpt-4o-mini: for a 72-digit amount it returned 75 digits.
+    [Fact]
+    public void A_huge_amount_is_still_too_large_when_the_model_miscopies_the_digits()
+    {
+        IntentDecision decision = Validate(
+            "deposit", "savings", amount: HugeAmount + "000", request: $"deposit {HugeAmount} to savings");
+
+        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
+        Assert.StartsWith("That amount is larger than the simulator can handle.", decision.Message);
+    }
+
+    [Fact]
+    public void A_huge_amount_the_customer_never_wrote_is_asked_for()
+    {
+        IntentDecision decision = Validate(
+            "deposit", "savings", amount: HugeAmount, request: "deposit a lot into savings");
+
+        Assert.Equal(DecisionKind.MissingDetails, decision.Kind);
+    }
+
+    // Reading this as a number rounds it to 5.0000..., which used to hide the extra decimal places.
+    [Fact]
+    public void Decimal_places_are_counted_as_written_not_after_rounding()
+    {
+        IntentDecision decision = Validate("deposit", "savings", amount: "5.00000000000000000000000000001");
+
+        Assert.Equal(DecisionKind.InvalidAmount, decision.Kind);
+        Assert.Contains("no more than two decimal places", decision.Message);
+    }
+
     #endregion
 
     #region Requests the app can't handle are refused

@@ -42,10 +42,17 @@ internal sealed class ReplyWriter(IChatClient chatClient)
             .AppendLine($"Command run: {command}")
             .AppendLine($"Simulator result: {simulatorResult}");
 
+        // State the outcome plainly. Without this, the model sometimes called a withdrawal that emptied
+        // an account "unsuccessful".
         string? errorCode = SimulatorErrors.Code(simulatorResult);
-        if (errorCode is not null)
+        if (errorCode is null)
         {
-            facts.AppendLine($"Meaning of {errorCode}: {SimulatorErrors.MeaningFor(errorCode)}");
+            facts.AppendLine("Outcome: the request succeeded.");
+        }
+        else
+        {
+            facts.AppendLine("Outcome: the request was declined, and no balance changed.")
+                 .AppendLine($"Meaning of {errorCode}: {SimulatorErrors.MeaningFor(errorCode)}");
         }
 
         string reply = await chatClient.CompleteAsync(

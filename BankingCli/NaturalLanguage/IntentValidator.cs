@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace BankingCli.NaturalLanguage;
 
@@ -11,7 +12,7 @@ namespace BankingCli.NaturalLanguage;
 /// formatted amount), never from the model's text. Accounts and amounts only count if the
 /// customer actually wrote them.
 /// </remarks>
-internal static class IntentValidator
+internal static partial class IntentValidator
 {
     #region Messages shown to the customer
 
@@ -28,6 +29,9 @@ internal static class IntentValidator
     private const string InvalidAmountMessage =
         "The amount needs to be a positive dollar value with no more than two decimal places, such as 25 or 25.50. " +
         "Please try again with a valid amount. " + NothingChanged;
+
+    private const string TooLargeMessage =
+        "That amount is larger than the simulator can handle. Please try a smaller amount. " + NothingChanged;
 
     private const string WhichBalanceMessage =
         "Which balance would you like to see: chequing, savings, or both? Please include it when you try again.";
@@ -95,9 +99,7 @@ internal static class IntentValidator
             return AskFor(action, missing, example);
         }
 
-        return amountCheck == AmountCheck.Valid
-            ? IntentDecision.Run($"{command} {account} {amount}")
-            : IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage);
+        return RunOrExplain(amountCheck, $"{command} {account} {amount}");
     }
 
     /// <summary>
@@ -132,9 +134,7 @@ internal static class IntentValidator
         }
 
         // "Savings to savings" is passed through, so the simulator applies its own SAME_ACCOUNT rule.
-        return amountCheck == AmountCheck.Valid
-            ? IntentDecision.Run($"transfer {from} {to} {amount}")
-            : IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage);
+        return RunOrExplain(amountCheck, $"transfer {from} {to} {amount}");
     }
 
     /// <summary>
@@ -165,10 +165,19 @@ internal static class IntentValidator
 
     private enum AmountCheck
     {
-        Missing, // Not given, or the customer never wrote that number.
-        Invalid, // Not a positive amount with at most two decimal places.
+        Missing,  // Not given, or the customer never wrote that number.
+        Invalid,  // Not a positive amount with at most two decimal places.
+        TooLarge, // A proper amount, but too many digits to work with.
         Valid
     }
+
+    /// <summary>Runs the command when the amount is valid, or explains what's wrong with the amount.</summary>
+    private static IntentDecision RunOrExplain(AmountCheck amountCheck, string command) => amountCheck switch
+    {
+        AmountCheck.Valid => IntentDecision.Run(command),
+        AmountCheck.TooLarge => IntentDecision.Decline(DecisionKind.InvalidAmount, TooLargeMessage),
+        _ => IntentDecision.Decline(DecisionKind.InvalidAmount, InvalidAmountMessage)
+    };
 
     /// <summary>
     /// Checks the model's amount. It must be a number the customer actually wrote, above zero,
@@ -191,6 +200,13 @@ internal static class IntentValidator
         if (!decimal.TryParse(trimmed, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture, out decimal amount))
         {
+            // Plain digits that won't fit in a number are a real amount, just far too large, as long as the
+            // customer typed a number that size. (Models often miscopy long numbers, so the digits aren't compared.)
+            if (IsPlainAmount(trimmed))
+            {
+                return StatedAmounts.HasNumberTooLargeToRead(request) ? AmountCheck.TooLarge : AmountCheck.Missing;
+            }
+
             return AmountCheck.Invalid;
         }
 
@@ -200,7 +216,8 @@ internal static class IntentValidator
             return AmountCheck.Missing;
         }
 
-        if (amount <= 0m || amount != decimal.Round(amount, 2))
+        // Decimal places are counted in the text, because reading a very long number can round it.
+        if (amount <= 0m || DecimalPlaces(trimmed) > 2)
         {
             return AmountCheck.Invalid;
         }
@@ -220,6 +237,21 @@ internal static class IntentValidator
     }
 
     private static bool IsBlank(string? text) => string.IsNullOrWhiteSpace(text);
+
+    private static int DecimalPlaces(string number)
+    {
+        int point = number.IndexOf('.');
+        return point < 0 ? 0 : number.Length - point - 1;
+    }
+
+    /// <summary>
+    /// True for an amount written the way the simulator wants it: digits, above zero, with at most
+    /// two decimal places and no sign, such as "25" or "25.50". It may still be too large.
+    /// </summary>
+    internal static bool IsPlainAmount(string text) => PlainAmountPattern().IsMatch(text);
+
+    [GeneratedRegex(@"^(?=.*[1-9])\d+(?:\.\d{1,2})?$")]
+    private static partial Regex PlainAmountPattern();
 
     /// <summary>Builds a message such as "I need a bit more information to make that transfer: the amount."</summary>
     private static IntentDecision AskFor(string action, List<string> missing, string example)

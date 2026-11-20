@@ -10,7 +10,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```sh
 dotnet build
-dotnet test                                          # 191 tests, no API key or network needed
+dotnet test                                          # 208 tests, no API key or network needed
 dotnet run --project BankingCli                      # start the CLI
 dotnet run --project BankingCli -- --show-commands   # also show the simulator command behind each English request
 ```
@@ -74,7 +74,7 @@ To fix this: Check that the key is correct and still active, then restart the ap
 
 ## Verification
 
-The three required checks ran on 2026-11-18 against OpenAI `gpt-4o-mini`, using `dotnet run --project BankingCli -- --show-commands`. The `[command]` and `[result]` lines come from `--show-commands`. The AI's wording varies between runs. The amounts and balances don't, because they come from the simulator.
+The three required checks ran on 2026-11-20 against OpenAI `gpt-4o-mini`, using `dotnet run --project BankingCli -- --show-commands`. The `[command]` and `[result]` lines come from `--show-commands`. The AI's wording varies between runs. The amounts and balances don't, because they come from the simulator.
 
 **1. Successful transfer.** Fund savings, ask for a transfer in English, then check balances.
 
@@ -84,7 +84,7 @@ DEPOSIT $10.00 TO savings | savings=$10.00
 bank> Move four dollars from savings to chequing
   [command: transfer savings chequing 4.00]
   [result: TRANSFER $4.00 FROM savings TO chequing | savings=$6.00 | chequing=$4.00]
-The transfer of $4.00 from your savings account to your chequing account was successful. Your savings balance is now $6.00, and your chequing balance is $4.00.
+The transfer of $4.00 from your savings account to your chequing account was successful, leaving you with a balance of $6.00 in savings and $4.00 in chequing.
 bank> balance
 chequing=$4.00 | savings=$6.00
 ```
@@ -103,7 +103,7 @@ chequing=$0.00 | savings=$10.00
 bank> Move $3 from savings to chequing
   [command: transfer savings chequing 3.00]
   [result: TRANSFER $3.00 FROM savings TO chequing | savings=$7.00 | chequing=$3.00]
-The transfer of $3.00 from your savings account to your chequing account was successful. Your savings balance is now $7.00, and your chequing balance is $3.00.
+Your transfer of $3.00 from savings to chequing was successful. Your new savings balance is $7.00, and your chequing balance is $3.00.
 ```
 
 Observed: the app asked for the amount and ran nothing (there is no `[command]` line). The balances didn't change, and the complete request then worked.
@@ -116,7 +116,7 @@ DEPOSIT $10.00 TO chequing | chequing=$10.00
 bank> Withdraw $25 from chequing
   [command: withdraw chequing 25.00]
   [result: ERROR INSUFFICIENT_FUNDS | chequing=$10.00]
-The withdrawal of $25 from your chequing account did not occur because there are insufficient funds; your current balance is $10.00.
+Your withdrawal of $25 from your chequing account was declined because there are insufficient funds; your current balance is $10.00.
 bank> balance
 chequing=$10.00 | savings=$0.00
 ```
@@ -136,7 +136,7 @@ Observed: the simulator declined the withdrawal and the balances didn't change. 
 - **No API key:** answering `y` at the startup prompt and typing a key turned everyday English on. Answering `n` left the original commands working, and `help` and `status` explained how to turn it on.
 - **Original commands:** with piped input, a 19-line script of original commands, including malformed ones, produced output byte-for-byte identical to the starter's.
 
-**Automated tests:** `dotnet test` runs 191 xUnit tests against the real simulator, with a scripted fake standing in for the API. They cover:
+**Automated tests:** `dotnet test` runs 208 xUnit tests against the real simulator, with a scripted fake standing in for the API. They cover:
 
 - routing, and compatibility with the original commands
 - validation, including accounts and amounts the model invented
@@ -158,6 +158,8 @@ Observed: the simulator declined the withdrawal and the balances didn't change. 
   - A reply could attach correct figures to the wrong account, or call a declined request successful.
 
   Both are now caught by local checks. The fix was verified with unit tests that include every real model reply, all still accepted, and by re-running every manual check.
+
+  The new check then caught real misleading replies: `gpt-4o-mini` twice called a successful withdrawal that emptied chequing "unsuccessful". The app showed the simulator's result instead. Telling the model the outcome explicitly fixed it (6 of 6 runs correct).
 
 ## Limitations, and what's beyond the brief
 

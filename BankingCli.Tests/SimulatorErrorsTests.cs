@@ -19,6 +19,21 @@ public class SimulatorErrorsTests
     public void Each_error_says_what_went_wrong_and_what_to_do(string simulatorResult, string expected) =>
         Assert.Equal(expected, SimulatorErrors.Explain(simulatorResult));
 
+    [Theory]
+    [InlineData("deposit savings 100000000000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("deposit savings 99999999999999999999999999999")]
+    public void A_properly_written_amount_that_is_rejected_is_explained_as_too_large(string command) =>
+        Assert.Equal("That amount is larger than the simulator can handle. Try a smaller amount. Nothing has been changed.",
+            SimulatorErrors.Explain("ERROR INVALID_AMOUNT", command));
+
+    [Theory]
+    [InlineData("deposit savings -5")]
+    [InlineData("deposit savings 0")]
+    [InlineData("deposit savings 1.234")]
+    [InlineData("deposit savings abc")]
+    public void Other_invalid_amounts_get_the_general_explanation(string command) =>
+        Assert.StartsWith("That amount isn't valid.", SimulatorErrors.Explain("ERROR INVALID_AMOUNT", command));
+
     [Fact]
     public void Successful_results_have_no_explanation() =>
         Assert.Null(SimulatorErrors.Explain("DEPOSIT $10.00 TO savings | savings=$10.00"));

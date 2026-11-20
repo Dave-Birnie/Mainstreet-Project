@@ -20,6 +20,7 @@ public class ReplyWriterTests
         (IReadOnlyList<ChatMessage> messages, bool requireJson) = Assert.Single(chat.Calls);
         Assert.False(requireJson);
         Assert.Contains($"Simulator result: {TransferResult}", messages[1].Content);
+        Assert.Contains("Outcome: the request succeeded.", messages[1].Content);
     }
 
     [Fact]
@@ -30,8 +31,9 @@ public class ReplyWriterTests
         await new ReplyWriter(chat).WriteAsync(
             "Withdraw $25 from chequing", "withdraw chequing 25.00", "ERROR INSUFFICIENT_FUNDS | chequing=$0.00", default);
 
-        Assert.Contains("Meaning of INSUFFICIENT_FUNDS: The account the money would come from does not have enough funds",
-            chat.Calls[0].Messages[1].Content);
+        string facts = chat.Calls[0].Messages[1].Content;
+        Assert.Contains("Outcome: the request was declined, and no balance changed.", facts);
+        Assert.Contains("Meaning of INSUFFICIENT_FUNDS: The account the money would come from does not have enough funds", facts);
     }
 
     [Fact]

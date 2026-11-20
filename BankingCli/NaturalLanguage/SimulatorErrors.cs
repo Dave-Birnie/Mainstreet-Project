@@ -91,7 +91,10 @@ internal static partial class SimulatorErrors
     /// A plain-English explanation of a simulator error and what to do about it,
     /// or null when the result isn't an error.
     /// </summary>
-    public static string? Explain(string simulatorResult)
+    /// <param name="simulatorResult">The simulator's output.</param>
+    /// <param name="command">The command that produced it, if known. Used to tell a too-large amount
+    /// apart from other invalid amounts.</param>
+    public static string? Explain(string simulatorResult, string? command = null)
     {
         string? code = Code(simulatorResult);
         if (code is null)
@@ -114,6 +117,14 @@ internal static partial class SimulatorErrors
             problem = $"{char.ToUpperInvariant(account[0])}{account[1..]} only has {balance.Groups["amount"].Value}, " +
                       "which isn't enough.";
             fix = $"Try a smaller amount, or move money into {account} first.";
+        }
+
+        // A properly written amount that the simulator still rejects can only be too large.
+        string? amount = command?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        if (code == "INVALID_AMOUNT" && amount is not null && IntentValidator.IsPlainAmount(amount))
+        {
+            problem = "That amount is larger than the simulator can handle.";
+            fix = "Try a smaller amount.";
         }
 
         return info.ChangedNothing ? $"{problem} {fix} {NothingChanged}" : $"{problem} {fix}";

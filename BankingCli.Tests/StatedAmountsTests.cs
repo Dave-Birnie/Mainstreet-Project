@@ -18,6 +18,12 @@ public class StatedAmountsTests
     [InlineData("Deposit two thousand five hundred dollars", "2500")]
     [InlineData("Deposit one million dollars", "1000000")]
     [InlineData("Deposit a dollar into savings", "1")]
+    [InlineData("Deposit 50bucks into savings", "50")]
+    [InlineData("transfer 1k from checking to savings", "1000")]
+    [InlineData("Move 2.5K from savings to chequing", "2500")]
+    [InlineData("Deposit $3 thousand into savings", "3000")]
+    [InlineData("Withdraw 5 grand from savings", "5000")]
+    [InlineData("Deposit 2 million into savings", "2000000")]
     public void Amounts_the_customer_wrote_are_found(string request, string amount) =>
         Assert.True(StatedAmounts.IsStatedIn(request, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture)));
 
@@ -26,6 +32,7 @@ public class StatedAmountsTests
     [InlineData("Deposit 25 into savings", "250")]
     [InlineData("Deposit a couple of dollars", "2")]
     [InlineData("Put fifty into savings", "15")]
+    [InlineData("Deposit 1kg of gold", "1000")]
     public void Amounts_the_customer_never_wrote_are_not_found(string request, string amount) =>
         Assert.False(StatedAmounts.IsStatedIn(request, decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture)));
 }
